@@ -49,7 +49,7 @@ mod catalog_tests {
                 namespace: {
                     let mut v = String::with_capacity(5);
                     for _ in 0..10 {
-                        v.push((&mut rng).gen_range('a'..'z'));
+                        v.push(rng.gen_range('a'..'z'));
                     }
                     format!("{prefix}_{v}")
                 },
@@ -74,7 +74,7 @@ mod catalog_tests {
                 let table_name = {
                     let mut v = String::with_capacity(8);
                     for _ in 0..10 {
-                        v.push((&mut rng).gen_range('a'..'z'));
+                        v.push(rng.gen_range('a'..'z'));
                     }
                     v
                 };
@@ -264,7 +264,7 @@ mod catalog_tests {
                         let q = format!("show columns from test_catalog_sql.{}.{}", np.namespace, name);
                         let df = sc.sql(&q).await.unwrap();
                         let record = df.collect().await.unwrap();
-                        assert!(record.len() > 0);
+                        assert!(!record.is_empty());
                     }
                     {
                         // test select

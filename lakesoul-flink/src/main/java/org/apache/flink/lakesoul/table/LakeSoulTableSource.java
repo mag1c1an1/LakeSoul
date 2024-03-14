@@ -9,9 +9,11 @@ import com.dmetasoul.lakesoul.meta.DBManager;
 import com.dmetasoul.lakesoul.meta.DBUtil;
 import com.dmetasoul.lakesoul.meta.entity.PartitionInfo;
 import com.dmetasoul.lakesoul.meta.entity.TableInfo;
+import io.substrait.proto.Plan;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.lakesoul.source.LakeSoulSource;
 import org.apache.flink.lakesoul.source.ParquetFilters;
+import org.apache.flink.lakesoul.substrait.SubstraitUtil;
 import org.apache.flink.lakesoul.tool.LakeSoulSinkOptions;
 import org.apache.flink.lakesoul.types.TableId;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -60,7 +62,10 @@ public class LakeSoulTableSource
 
     protected List<Map<String, String>> remainingPartitions;
 
+    // TODO remove this
     protected FilterPredicate filter;
+    // TODO merge
+    protected io.substrait.proto.Plan filterPlan;
 
     public LakeSoulTableSource(TableId tableId,
                                RowType rowType,
@@ -84,6 +89,7 @@ public class LakeSoulTableSource
         lsts.projectedFields = this.projectedFields;
         lsts.remainingPartitions = this.remainingPartitions;
         lsts.filter = this.filter;
+        lsts.filterPlan = this.filterPlan;
         return lsts;
     }
 
@@ -113,10 +119,14 @@ public class LakeSoulTableSource
         // find acceptable non partition filters
         Tuple2<Result, FilterPredicate> filterPushDownResult = ParquetFilters.toParquetFilter(nonPartitionFilters,
                 remainingFilters);
+        Tuple2<Result, Plan> filterPlanRes = SubstraitUtil.toPlan(nonPartitionFilters,
+                remainingFilters, tableInfo.getTableName(), tableInfo.getTableSchema());
         this.filter = filterPushDownResult.f1;
+        this.filterPlan = filterPlanRes.f1;
         LOG.info("Applied filters to native io: {}, accepted {}, remaining {}", this.filter,
                 filterPushDownResult.f0.getAcceptedFilters(),
                 filterPushDownResult.f0.getRemainingFilters());
+        LOG.info("FilterPlan: {}", this.filterPlan);
         return filterPushDownResult.f0;
     }
 
@@ -215,7 +225,8 @@ public class LakeSoulTableSource
                         this.pkColumns,
                         this.optionParams,
                         this.remainingPartitions,
-                        this.filter));
+                        this.filter,
+                        this.filterPlan));
     }
 
     @Override

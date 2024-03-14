@@ -2,6 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+
 use anyhow::anyhow;
 use arrow::error::ArrowError;
 use arrow_schema::{Schema, SchemaRef};
@@ -14,12 +18,10 @@ use datafusion::optimizer::push_down_filter::PushDownFilter;
 use datafusion::optimizer::push_down_projection::PushDownProjection;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use datafusion_common::DataFusionError::{External, ObjectStore};
+use datafusion_substrait::substrait::proto::Plan;
 use derivative::Derivative;
 use object_store::aws::AmazonS3Builder;
 use object_store::{ClientOptions, RetryConfig};
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
 use url::{ParseError, Url};
 
 #[cfg(feature = "hdfs")]
@@ -56,6 +58,7 @@ pub struct LakeSoulIOConfig {
     // filtering predicates
     pub(crate) filter_strs: Vec<String>,
     pub(crate) filters: Vec<Expr>,
+    pub(crate) filter_protos: Vec<Plan>,
     // read or write batch size
     #[derivative(Default(value = "8192"))]
     pub(crate) batch_size: usize,
@@ -152,7 +155,6 @@ impl LakeSoulIOConfigBuilder {
         self
     }
 
-
     pub fn with_range_partitions(mut self, range_partitions: Vec<String>) -> Self {
         self.config.range_partitions = range_partitions;
         self
@@ -205,6 +207,11 @@ impl LakeSoulIOConfigBuilder {
 
     pub fn with_filter_str(mut self, filter_str: String) -> Self {
         self.config.filter_strs.push(filter_str);
+        self
+    }
+
+    pub fn with_filter_proto(mut self, filter_proto: Plan) -> Self {
+        self.config.filter_protos.push(filter_proto);
         self
     }
 

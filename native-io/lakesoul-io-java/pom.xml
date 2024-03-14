@@ -139,6 +139,18 @@ SPDX-License-Identifier: Apache-2.0
                 </exclusion>
             </exclusions>
         </dependency>
+        <dependency>
+            <groupId>io.substrait</groupId>
+            <artifactId>core</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-jdk14</artifactId>
+                </exclusion>
+            </exclusions>
+            <version>0.28.0</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
     <profiles>

@@ -9,6 +9,7 @@ import com.dmetasoul.lakesoul.meta.DataFileInfo;
 import com.dmetasoul.lakesoul.meta.DataOperation;
 import com.dmetasoul.lakesoul.meta.LakeSoulOptions;
 import com.dmetasoul.lakesoul.meta.entity.TableInfo;
+import io.substrait.proto.Plan;
 import org.apache.flink.api.connector.source.*;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
@@ -42,8 +43,12 @@ public class LakeSoulSource implements Source<RowData, LakeSoulSplit, LakeSoulPe
     @Nullable
     List<Map<String, String>> remainingPartitions;
 
+    // TODO remove this
     @Nullable
     FilterPredicate filter;
+
+    @Nullable
+    Plan filterPlan;
 
     public LakeSoulSource(TableId tableId,
                           RowType rowType,
@@ -52,7 +57,8 @@ public class LakeSoulSource implements Source<RowData, LakeSoulSplit, LakeSoulPe
                           List<String> pkColumns,
                           Map<String, String> optionParams,
                           @Nullable List<Map<String, String>> remainingPartitions,
-                          @Nullable FilterPredicate filter) {
+                          @Nullable FilterPredicate filter,
+                          @Nullable Plan filterPlan) {
         this.tableId = tableId;
         this.rowType = rowType;
         this.rowTypeWithPk = rowTypeWithPk;
@@ -61,6 +67,7 @@ public class LakeSoulSource implements Source<RowData, LakeSoulSplit, LakeSoulPe
         this.optionParams = optionParams;
         this.remainingPartitions = remainingPartitions;
         this.filter = filter;
+        this.filterPlan = filterPlan;
     }
 
     @Override
@@ -83,7 +90,8 @@ public class LakeSoulSource implements Source<RowData, LakeSoulSplit, LakeSoulPe
                         this.pkColumns,
                         this.isStreaming,
                         this.optionParams.getOrDefault(LakeSoulSinkOptions.CDC_CHANGE_COLUMN, ""),
-                        this.filter),
+                        this.filter,
+                        this.filterPlan),
                 new LakeSoulRecordEmitter(),
                 readerContext.getConfiguration(),
                 readerContext);

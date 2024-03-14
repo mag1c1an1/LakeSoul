@@ -457,6 +457,18 @@ SPDX-License-Identifier: Apache-2.0
             <version>3.3.2</version>
             <scope>${local.scope}</scope>
         </dependency>
+        <dependency>
+            <groupId>io.substrait</groupId>
+            <artifactId>core</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-jdk14</artifactId>
+                </exclusion>
+            </exclusions>
+            <version>0.28.0</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -586,6 +598,8 @@ SPDX-License-Identifier: Apache-2.0
                             <include>com.google.code.gson:gson</include>
                             <include>dev.failsafe:failsafe</include>
                             <include>com.google.protobuf:protobuf-java</include>
+                            <!--substrait-->
+                            <inclue>io.substrait:core</inclue>
                         </includes>
                         <excludes>
                             <exclude>org.apache.logging.log4j:*</exclude>

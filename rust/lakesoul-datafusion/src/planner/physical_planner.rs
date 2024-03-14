@@ -19,7 +19,7 @@ use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
 use async_trait::async_trait;
 
 use datafusion::logical_expr::{DmlStatement, WriteOp};
-use lakesoul_io::helpers::{column_names_to_physical_sort_expr, column_names_to_physical_expr};
+use lakesoul_io::helpers::{column_names_to_physical_expr, column_names_to_physical_sort_expr};
 use lakesoul_io::repartition::RepartitionByRangeAndHashExec;
 
 use crate::lakesoul_table::LakeSoulTable;
@@ -62,25 +62,28 @@ impl PhysicalPlanner for LakeSoulPhysicalPlanner {
                     Ok(provider) => {
                         let physical_input = self.create_physical_plan(input, session_state).await?;
 
-                        if lakesoul_table.primary_keys().is_empty() {
-                            if !lakesoul_table
+                        if lakesoul_table.primary_keys().is_empty()
+                            && !lakesoul_table
                                 .schema()
                                 .logically_equivalent_names_and_types(&Schema::from(input.schema().as_ref()))
-                            {
-                                return Err(DataFusionError::Plan(
-                                    // Return an error if schema of the input query does not match with the table schema.
-                                    "Inserting query must have the same schema with the table.".to_string(),
-                                ));
-                            }
-                        } 
-                        let  physical_input = if !lakesoul_table.primary_keys().is_empty() || !lakesoul_table.range_partitions().is_empty() {
+                        {
+                            return Err(DataFusionError::Plan(
+                                // Return an error if schema of the input query does not match with the table schema.
+                                "Inserting query must have the same schema with the table.".to_string(),
+                            ));
+                        }
+                        let physical_input = if !lakesoul_table.primary_keys().is_empty()
+                            || !lakesoul_table.range_partitions().is_empty()
+                        {
                             let input_schema = physical_input.schema();
                             let input_dfschema = input.as_ref().schema();
                             let sort_expr = column_names_to_physical_sort_expr(
                                 [
-                                    lakesoul_table.range_partitions().clone(), 
+                                    lakesoul_table.range_partitions().clone(),
                                     lakesoul_table.primary_keys().clone(),
-                                ].concat().as_slice(),
+                                ]
+                                .concat()
+                                .as_slice(),
                                 input_dfschema,
                                 &input_schema,
                                 session_state,
@@ -91,8 +94,9 @@ impl PhysicalPlanner for LakeSoulPhysicalPlanner {
                                 &input_schema,
                                 session_state,
                             )?;
-                            
-                            let hash_partitioning = Partitioning::Hash(hash_partitioning_expr, lakesoul_table.hash_bucket_num());
+
+                            let hash_partitioning =
+                                Partitioning::Hash(hash_partitioning_expr, lakesoul_table.hash_bucket_num());
                             let range_partitioning_expr = column_names_to_physical_expr(
                                 lakesoul_table.range_partitions(),
                                 input_dfschema,
@@ -100,7 +104,11 @@ impl PhysicalPlanner for LakeSoulPhysicalPlanner {
                                 session_state,
                             )?;
                             let sort_exec = Arc::new(SortExec::new(sort_expr, physical_input));
-                            Arc::new(RepartitionByRangeAndHashExec::try_new(sort_exec, range_partitioning_expr, hash_partitioning)?)
+                            Arc::new(RepartitionByRangeAndHashExec::try_new(
+                                sort_exec,
+                                range_partitioning_expr,
+                                hash_partitioning,
+                            )?)
                         } else {
                             physical_input
                         };
