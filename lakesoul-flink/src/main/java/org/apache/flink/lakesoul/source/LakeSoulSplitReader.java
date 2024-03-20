@@ -40,10 +40,8 @@ public class LakeSoulSplitReader implements SplitReader<RowData, LakeSoulSplit> 
 
     String cdcColumn;
 
-    // TODO remove this
-    FilterPredicate filter;
-
-    Plan filterPlan;
+    FilterPredicate filterStr;
+    Plan filter;
 
     private LakeSoulOneSplitRecordsReader lastSplitReader;
 
@@ -53,8 +51,8 @@ public class LakeSoulSplitReader implements SplitReader<RowData, LakeSoulSplit> 
                                List<String> pkColumns,
                                boolean isStreaming,
                                String cdcColumn,
-                               FilterPredicate filter,
-                               Plan filterPlan) {
+                               FilterPredicate filterStr,
+                               Plan filter) {
         this.conf = conf;
         this.splits = new ArrayDeque<>();
         this.rowType = rowType;
@@ -62,8 +60,8 @@ public class LakeSoulSplitReader implements SplitReader<RowData, LakeSoulSplit> 
         this.pkColumns = pkColumns;
         this.isStreaming = isStreaming;
         this.cdcColumn = cdcColumn;
+        this.filterStr = filterStr;
         this.filter = filter;
-        this.filterPlan = filterPlan;
     }
 
     @Override
@@ -78,8 +76,8 @@ public class LakeSoulSplitReader implements SplitReader<RowData, LakeSoulSplit> 
                             this.pkColumns,
                             this.isStreaming,
                             this.cdcColumn,
-                            this.filter,
-                            this.filterPlan
+                            this.filterStr,
+                            this.filter
                     );
             return lastSplitReader;
         } catch (Exception e) {

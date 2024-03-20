@@ -63,9 +63,9 @@ public class LakeSoulTableSource
     protected List<Map<String, String>> remainingPartitions;
 
     // TODO remove this
-    protected FilterPredicate filter;
+    protected FilterPredicate filterStr;
     // TODO merge
-    protected io.substrait.proto.Plan filterPlan;
+    protected io.substrait.proto.Plan filter;
 
     public LakeSoulTableSource(TableId tableId,
                                RowType rowType,
@@ -89,7 +89,7 @@ public class LakeSoulTableSource
         lsts.projectedFields = this.projectedFields;
         lsts.remainingPartitions = this.remainingPartitions;
         lsts.filter = this.filter;
-        lsts.filterPlan = this.filterPlan;
+        lsts.filterStr = this.filterStr;
         return lsts;
     }
 
@@ -110,23 +110,23 @@ public class LakeSoulTableSource
         DBUtil.TablePartitionKeys partitionKeys = DBUtil.parseTableInfoPartitions(tableInfo.getPartitions());
         Set<String> partitionCols = new HashSet<>(partitionKeys.rangeKeys);
         for (ResolvedExpression filter : filters) {
-            if (ParquetFilters.filterContainsPartitionColumn(filter, partitionCols)) {
+            if (SubstraitUtil.filterContainsPartitionColumn(filter, partitionCols)) {
                 remainingFilters.add(filter);
             } else {
                 nonPartitionFilters.add(filter);
             }
         }
         // find acceptable non partition filters
-        Tuple2<Result, FilterPredicate> filterPushDownResult = ParquetFilters.toParquetFilter(nonPartitionFilters,
+        Tuple2<Result, FilterPredicate> filterPushDownRes = ParquetFilters.toParquetFilter(nonPartitionFilters,
                 remainingFilters);
-        Tuple2<Result, Plan> filterPlanRes = SubstraitUtil.toPlan(nonPartitionFilters,
+        Tuple2<Result, Plan> filterPushDownResult = SubstraitUtil.toPlan(nonPartitionFilters,
                 remainingFilters, tableInfo.getTableName(), tableInfo.getTableSchema());
         this.filter = filterPushDownResult.f1;
-        this.filterPlan = filterPlanRes.f1;
+        this.filterStr = filterPushDownRes.f1;
         LOG.info("Applied filters to native io: {}, accepted {}, remaining {}", this.filter,
                 filterPushDownResult.f0.getAcceptedFilters(),
                 filterPushDownResult.f0.getRemainingFilters());
-        LOG.info("FilterPlan: {}", this.filterPlan);
+//        LOG.info("FilterPlan: {}", this.filterPlan);
         return filterPushDownResult.f0;
     }
 
@@ -225,8 +225,8 @@ public class LakeSoulTableSource
                         this.pkColumns,
                         this.optionParams,
                         this.remainingPartitions,
-                        this.filter,
-                        this.filterPlan));
+                        this.filterStr,
+                        this.filter));
     }
 
     @Override

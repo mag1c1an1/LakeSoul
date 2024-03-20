@@ -74,9 +74,8 @@ public class LakeSoulOneSplitRecordsReader implements RecordsWithSplitIds<RowDat
     // arrow batch -> row, with requested schema
     private ArrowReader curArrowReaderRequestedSchema;
 
-    private final FilterPredicate filter;
-
-    private final Plan filterPlan;
+    private final FilterPredicate filterPredicate;
+    private final Plan filter;
 
     public LakeSoulOneSplitRecordsReader(Configuration conf,
                                          LakeSoulSplit split,
@@ -85,8 +84,8 @@ public class LakeSoulOneSplitRecordsReader implements RecordsWithSplitIds<RowDat
                                          List<String> pkColumns,
                                          boolean isStreaming,
                                          String cdcColumn,
-                                         FilterPredicate filter,
-                                         Plan filterPlan)
+                                         FilterPredicate filterPredicate,
+                                         Plan filter)
             throws Exception {
         this.split = split;
         this.skipRecords = split.getSkipRecord();
@@ -98,8 +97,8 @@ public class LakeSoulOneSplitRecordsReader implements RecordsWithSplitIds<RowDat
         this.isStreaming = isStreaming;
         this.cdcColumn = cdcColumn;
         this.finishedSplit = Collections.singleton(splitId);
+        this.filterPredicate = filterPredicate;
         this.filter = filter;
-        this.filterPlan = filterPlan;
         initializeReader();
         recoverFromSkipRecord();
     }
@@ -134,10 +133,11 @@ public class LakeSoulOneSplitRecordsReader implements RecordsWithSplitIds<RowDat
         }
 
         if (filter != null) {
-            reader.addFilter(filter.toString());
+            reader.addFilterProto(this.filter);
         }
-        if (filterPlan != null) {
-            reader.addFilterProto(this.filterPlan);
+
+        if (filterPredicate !=null) {
+            reader.addFilter(filterPredicate.toString());
         }
 
         LOG.info("Initializing reader for split {}, pk={}, partitions={}," +

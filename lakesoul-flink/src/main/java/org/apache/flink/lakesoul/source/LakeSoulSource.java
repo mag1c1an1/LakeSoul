@@ -43,12 +43,10 @@ public class LakeSoulSource implements Source<RowData, LakeSoulSplit, LakeSoulPe
     @Nullable
     List<Map<String, String>> remainingPartitions;
 
-    // TODO remove this
     @Nullable
-    FilterPredicate filter;
-
+    FilterPredicate filterStr;
     @Nullable
-    Plan filterPlan;
+    Plan filter;
 
     public LakeSoulSource(TableId tableId,
                           RowType rowType,
@@ -57,8 +55,8 @@ public class LakeSoulSource implements Source<RowData, LakeSoulSplit, LakeSoulPe
                           List<String> pkColumns,
                           Map<String, String> optionParams,
                           @Nullable List<Map<String, String>> remainingPartitions,
-                          @Nullable FilterPredicate filter,
-                          @Nullable Plan filterPlan) {
+                          @Nullable FilterPredicate filterStr,
+                          @Nullable Plan filter) {
         this.tableId = tableId;
         this.rowType = rowType;
         this.rowTypeWithPk = rowTypeWithPk;
@@ -66,8 +64,9 @@ public class LakeSoulSource implements Source<RowData, LakeSoulSplit, LakeSoulPe
         this.pkColumns = pkColumns;
         this.optionParams = optionParams;
         this.remainingPartitions = remainingPartitions;
+        this.filterStr = filterStr;
         this.filter = filter;
-        this.filterPlan = filterPlan;
+
     }
 
     @Override
@@ -90,8 +89,8 @@ public class LakeSoulSource implements Source<RowData, LakeSoulSplit, LakeSoulPe
                         this.pkColumns,
                         this.isStreaming,
                         this.optionParams.getOrDefault(LakeSoulSinkOptions.CDC_CHANGE_COLUMN, ""),
-                        this.filter,
-                        this.filterPlan),
+                        this.filterStr,
+                        this.filter),
                 new LakeSoulRecordEmitter(),
                 readerContext.getConfiguration(),
                 readerContext);

@@ -55,9 +55,10 @@ public class SubstraitUtil {
             String tableSchema
     ) {
         List<ResolvedExpression> accepted = new ArrayList<>();
+        Schema arrowSchema = toArrowSchema(tableSchema);
         Expression last = null;
         for (ResolvedExpression expr : exprs) {
-            Expression e = doTransform(expr);
+            Expression e = doTransform(expr,arrowSchema);
             if (e == null) {
                 remaining.add(expr);
             } else {
@@ -70,44 +71,51 @@ public class SubstraitUtil {
                 }
             }
         }
-        Plan filter = toFilter(last, tableName, tableSchema);
+        Plan filter = toFilter(last, tableName, arrowSchema);
         return Tuple2.of(SupportsFilterPushDown.Result.of(accepted, remaining), planToProto(filter));
     }
 
-    static Plan toFilter(Expression e, String tableName, String tableSchema) {
+    static Schema toArrowSchema(String tableSchema) {
         try {
-            Schema arrow_schema = Schema.fromJSON(tableSchema);
-            List<String> tableNames = Stream.of(tableName).collect(Collectors.toList());
-            List<String> columnNames = new ArrayList<>();
-            List<Field> fields = arrow_schema.getFields();
-            List<Type> columnTypes = new ArrayList<>();
-            for (Field field : fields) {
-                Type type = fromArrowType(field.getType(), field.isNullable());
-                if (type == null) {
-                    return null;
-                }
-                columnTypes.add(type);
-                String name = field.getName();
-                columnNames.add(name);
-            }
-            NamedScan namedScan = Builder.namedScan(tableNames, columnNames, columnTypes);
-            namedScan =
-                    NamedScan.builder()
-                            .from(namedScan)
-                            .filter(e)
-                            .build();
-
-
-            Plan.Root root = Builder.root(namedScan);
-            return Builder.plan(root);
-        } catch (IOException ex) {
+            Schema arrowSchema = Schema.fromJSON(tableSchema);
+            return arrowSchema;
+        } catch (IOException e) {
             // FIXME fix this elegantly
-            throw new RuntimeException(ex);
+            throw new RuntimeException(e);
         }
     }
 
-    public static Expression doTransform(ResolvedExpression flinkExpression) {
-        SubstraitVisitor substraitVisitor = new SubstraitVisitor();
+    static Plan toFilter(Expression e, String tableName, Schema arrowSchema) {
+        if (e == null) {
+            return null;
+        }
+        List<String> tableNames = Stream.of(tableName).collect(Collectors.toList());
+        List<String> columnNames = new ArrayList<>();
+        List<Field> fields = arrowSchema.getFields();
+        List<Type> columnTypes = new ArrayList<>();
+        for (Field field : fields) {
+            Type type = fromArrowType(field.getType(), field.isNullable());
+            if (type == null) {
+                return null;
+            }
+            columnTypes.add(type);
+            String name = field.getName();
+            columnNames.add(name);
+        }
+        NamedScan namedScan = Builder.namedScan(tableNames, columnNames, columnTypes);
+        namedScan =
+                NamedScan.builder()
+                        .from(namedScan)
+                        .filter(e)
+                        .build();
+
+
+        Plan.Root root = Builder.root(namedScan);
+        return Builder.plan(root);
+    }
+
+    public static Expression doTransform(ResolvedExpression flinkExpression,Schema arrow_schema) {
+        SubstraitVisitor substraitVisitor = new SubstraitVisitor(arrow_schema);
         return flinkExpression.accept(substraitVisitor);
     }
 
