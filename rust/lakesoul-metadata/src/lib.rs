@@ -2,13 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::str::FromStr;
 use std::{collections::HashMap, io::ErrorKind};
+use std::str::FromStr;
 
 use postgres_types::{FromSql, ToSql};
 use prost::Message;
 pub use tokio::runtime::{Builder, Runtime};
-use tokio::spawn;
 pub use tokio_postgres::{Client, NoTls, Statement};
 use tokio_postgres::{Error, Row};
 
@@ -462,15 +461,15 @@ pub async fn execute_query(
         | DaoType::SelectTableInfoByTableId
         | DaoType::SelectTablePathIdByTablePath
         | DaoType::SelectTableInfoByTablePath
-            if params.len() == 1 =>
-        {
-            let result = client.query_opt(&statement, &[&params[0]]).await;
-            match result {
-                Ok(Some(row)) => vec![row],
-                Ok(None) => vec![],
-                Err(e) => return Err(LakeSoulMetaDataError::from(e)),
+        if params.len() == 1 =>
+            {
+                let result = client.query_opt(&statement, &[&params[0]]).await;
+                match result {
+                    Ok(Some(row)) => vec![row],
+                    Ok(None) => vec![],
+                    Err(e) => return Err(LakeSoulMetaDataError::from(e)),
+                }
             }
-        }
         DaoType::ListPartitionByTableId | DaoType::ListAllPathTablePathByNamespace if params.len() == 1 => {
             let result = client.query(&statement, &[&params[0]]).await;
             match result {
@@ -479,26 +478,26 @@ pub async fn execute_query(
             }
         }
         DaoType::SelectOnePartitionVersionByTableIdAndDesc | DaoType::ListPartitionByTableIdAndDesc
-            if params.len() == 2 =>
-        {
-            let result = client.query(&statement, &[&params[0], &params[1]]).await;
-            match result {
-                Ok(rows) => rows,
-                Err(e) => return Err(LakeSoulMetaDataError::from(e)),
+        if params.len() == 2 =>
+            {
+                let result = client.query(&statement, &[&params[0], &params[1]]).await;
+                match result {
+                    Ok(rows) => rows,
+                    Err(e) => return Err(LakeSoulMetaDataError::from(e)),
+                }
             }
-        }
         DaoType::SelectTableNameIdByTableName
         | DaoType::SelectTableInfoByTableNameAndNameSpace
         | DaoType::SelectTableInfoByIdAndTablePath
-            if params.len() == 2 =>
-        {
-            let result = client.query_opt(&statement, &[&params[0], &params[1]]).await;
-            match result {
-                Ok(Some(row)) => vec![row],
-                Ok(None) => vec![],
-                Err(e) => return Err(LakeSoulMetaDataError::from(e)),
+        if params.len() == 2 =>
+            {
+                let result = client.query_opt(&statement, &[&params[0], &params[1]]).await;
+                match result {
+                    Ok(Some(row)) => vec![row],
+                    Ok(None) => vec![],
+                    Err(e) => return Err(LakeSoulMetaDataError::from(e)),
+                }
             }
-        }
         DaoType::SelectOneDataCommitInfoByTableIdAndPartitionDescAndCommitId if params.len() == 3 => {
             let result = client
                 .query_opt(
@@ -523,31 +522,31 @@ pub async fn execute_query(
         }
         DaoType::ListCommitOpsBetweenVersions
         | DaoType::ListPartitionVersionByTableIdAndPartitionDescAndVersionRange
-            if params.len() == 4 =>
-        {
-            let result = client
-                .query(
-                    &statement,
-                    &[
-                        &params[0],
-                        &params[1],
-                        &i32::from_str(&params[2])?,
-                        &i32::from_str(&params[3])?,
-                    ],
-                )
-                .await;
-            match result {
-                Ok(rows) => rows,
-                Err(e) => return Err(LakeSoulMetaDataError::from(e)),
+        if params.len() == 4 =>
+            {
+                let result = client
+                    .query(
+                        &statement,
+                        &[
+                            &params[0],
+                            &params[1],
+                            &i32::from_str(&params[2])?,
+                            &i32::from_str(&params[3])?,
+                        ],
+                    )
+                    .await;
+                match result {
+                    Ok(rows) => rows,
+                    Err(e) => return Err(LakeSoulMetaDataError::from(e)),
+                }
             }
-        }
         DaoType::ListPartitionDescByTableIdAndParList if params.len() == 2 => {
             let partitions = "'".to_owned()
                 + &params[1]
-                    .replace('\'', "''")
-                    .split(PARTITION_DESC_DELIM)
-                    .collect::<Vec<&str>>()
-                    .join("','")
+                .replace('\'', "''")
+                .split(PARTITION_DESC_DELIM)
+                .collect::<Vec<&str>>()
+                .join("','")
                 + "'";
             let statement = format!("select m.table_id, t.partition_desc, m.version, m.commit_op, m.snapshot, m.expression, m.domain from (
                 select table_id,partition_desc,max(version) from partition_info
@@ -1136,18 +1135,18 @@ pub async fn execute_update(
         | DaoType::DeleteTableNameIdByTableId
         | DaoType::DeleteTablePathIdByTableId
         | DaoType::DeleteTablePathIdByTablePath
-            if params.len() == 1 =>
-        {
-            client.execute(&statement, &[&params[0]]).await
-        }
+        if params.len() == 1 =>
+            {
+                client.execute(&statement, &[&params[0]]).await
+            }
         DaoType::DeleteTableInfoByIdAndPath
         | DaoType::DeleteTableNameIdByTableNameAndNamespace
         | DaoType::DeletePartitionInfoByTableIdAndPartitionDesc
         | DaoType::DeleteDataCommitInfoByTableIdAndPartitionDesc
-            if params.len() == 2 =>
-        {
-            client.execute(&statement, &[&params[0], &params[1]]).await
-        }
+        if params.len() == 2 =>
+            {
+                client.execute(&statement, &[&params[0], &params[1]]).await
+            }
         DaoType::UpdateTableInfoPropertiesById | DaoType::UpdateNamespacePropertiesByNamespace if params.len() == 2 => {
             let properties: serde_json::Value = serde_json::from_str(&params[1])?;
             client.execute(&statement, &[&params[0], &properties]).await
@@ -1325,6 +1324,7 @@ pub async fn clean_meta_for_test(client: &Client) -> Result<i32> {
 }
 
 ///  Create a pg connection, return pg client
+#[cfg(not(target_family = "wasm"))]
 pub async fn create_connection(config: String) -> Result<Client> {
     let (client, connection) = match tokio_postgres::connect(config.as_str(), NoTls).await {
         Ok((client, connection)) => (client, connection),
@@ -1334,7 +1334,7 @@ pub async fn create_connection(config: String) -> Result<Client> {
         }
     };
 
-    spawn(async move {
+    tokio::spawn(async move {
         if let Err(e) = connection.await {
             eprintln!("connection error: {}", e);
         }
@@ -1342,6 +1342,16 @@ pub async fn create_connection(config: String) -> Result<Client> {
 
     Ok(client)
 }
+
+
+cfg_if::cfg_if! {
+if #[cfg(target_family = "wasm")] {
+/// only wasm-unknown-unknown related
+        mod wasm;
+        pub use wasm::*;
+        }
+}
+
 
 fn row_to_uuid_list(row: &Row) -> Vec<entity::Uuid> {
     row.get::<_, Vec<uuid::Uuid>>(4)

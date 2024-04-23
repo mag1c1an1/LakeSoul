@@ -10,41 +10,42 @@ members = [
     "lakesoul-io",
     "lakesoul-io-c",
     "lakesoul-datafusion"
-]
+    , "lakesoul-wasm"]
 resolver = "2"
 
 [profile.release]
 
 [workspace.dependencies]
-datafusion = { git = "https://github.com/lakesoul-io/arrow-datafusion.git", branch = "datafusion-33-parquet-prefetch" }
-datafusion-common = { git = "https://github.com/lakesoul-io/arrow-datafusion.git", branch = "datafusion-33-parquet-prefetch" }
-datafusion-substrait = { git = "https://github.com/lakesoul-io/arrow-datafusion.git", branch = "datafusion-33-parquet-prefetch" }
-arrow = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred" }
-arrow-schema = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred" }
-arrow-array = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred" }
-arrow-buffer = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred" }
-arrow-cast = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred" }
-arrow-arith = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred" }
-parquet = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred" }
-object_store = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "object_store_0.7_opt", features = ["aws", "http"] }
+datafusion = { git = "https://github.com/lakesoul-io/arrow-datafusion.git", branch = "datafusion-33-parquet-prefetch", default-features = false }
+datafusion-common = { git = "https://github.com/lakesoul-io/arrow-datafusion.git", branch = "datafusion-33-parquet-prefetch", default-features = false }
+datafusion-substrait = { git = "https://github.com/lakesoul-io/arrow-datafusion.git", branch = "datafusion-33-parquet-prefetch", default-features = false }
+arrow = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred", default-features = false }
+arrow-schema = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred", default-features = false }
+arrow-array = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred", default-features = false }
+arrow-buffer = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred", default-features = false }
+arrow-cast = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred", default-features = false }
+arrow-arith = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred", default-features = false }
+parquet = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "arrow-rs-48-parquet-bufferred", default-features = false }
+object_store = { git = "https://github.com/lakesoul-io/arrow-rs.git", branch = "object_store_0.7_opt", default-features = false }
 
-tokio-stream = "0.1.9"
-tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["io", "compat"] }
+#tokio-stream = { version = "0.1.9", default-features = false }
+#tokio = "1"
+#tokio-util = "0.7"
 derivative = "2.2.0"
-atomic_refcell = "0.1.8"
+#atomic_refcell = "0.1.8"
 futures = "0.3"
 url = "2.2"
 async-trait = "0.1"
-serde_json = "1.0"
-log = "^0.4"
 prost = "0.12.3"
 prost-build = "0.12.3"
-uuid = { version = "1.4.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
-serde = { version = "1.0", features = ["derive", "std", "rc"] }
+##uuid = { version = "1.4.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
+uuid = "1.4.0"
+##serde = { version = "1.0", features = ["derive", "std", "rc"] }
+serde = "1.0"
 rand = "^0.8"
 bytes = "1.4.0"
 half = "^2.1"
 tracing = "0.1.40"
 thiserror = "1.0"
 anyhow = "1.0.79"
+cfg-if = "1.0.0"
