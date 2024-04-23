@@ -31,8 +31,8 @@ use crate::{hash_utils::create_hashes, repartition::distributor_channels::channe
 
 use self::distributor_channels::{DistributionReceiver, DistributionSender};
 
-use log::trace;
 use parking_lot::Mutex;
+use tracing::trace;
 
 mod distributor_channels;
 

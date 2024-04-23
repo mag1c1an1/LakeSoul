@@ -8,59 +8,61 @@ version = "2.5.0"
 edition = "2021"
 
 [dependencies]
-datafusion = { workspace = true }
-object_store = { workspace = true }
+datafusion = { git = "https://github.com/lakesoul-io/arrow-datafusion.git", branch = "datafusion-33-parquet-prefetch", default-features = false }
+#object_store = { workspace = true, features = ["aws"],optional = true }
 
-tokio-stream = { workspace = true }
-tokio = { workspace = true }
-tokio-util = { workspace = true }
-derivative = { workspace = true }
-atomic_refcell = { workspace = true }
-arrow = { workspace = true, features = ["prettyprint"] }
-arrow-schema = { workspace = true, features = ["serde"] }
-arrow-array = { workspace = true, features = ["chrono-tz"] }
-arrow-buffer = { workspace = true }
-arrow-cast = { workspace = true }
-parquet = { workspace = true, features = ["async", "arrow"] }
-futures = { workspace = true }
-datafusion-common = { workspace = true }
-serde = { workspace = true }
-url = { workspace = true }
-async-trait = { workspace = true }
-smallvec = "1.10"
-dary_heap = "0.3"
-bytes = { workspace = true }
-hdrs = { git = "https://github.com/lakesoul-io/hdrs.git", branch = "main", features = ["async_file"], optional = true }
-lazy_static = "1.4.0"
-chrono = "0.4"
-serde_json = { workspace = true }
-tracing = "0.1.40"
-proto = { path = "../proto" }
-parking_lot = "0.12.1"
-rand = { workspace = true }
-half = { workspace = true }
-log = "0.4.20"
-anyhow = { workspace = true, features = [] }
+#tokio-stream = "0.1"
+#tokio-util = { version = "0.7", default-features = false }
+#datafusion-common = { workspace = true, optional = true }
+#derivative = { workspace = true }
+#atomic_refcell = "0.1"
+#arrow = { workspace = true, features = ["prettyprint"] }
+#arrow-schema = { workspace = true, features = ["serde"] }
+#arrow-array = { workspace = true, features = ["chrono-tz"] }
+#arrow-buffer = { workspace = true }
+#arrow-cast = { workspace = true }
+#parquet = { workspace = true, features = ["async", "arrow"] }
+#futures = { workspace = true }
+#serde = { workspace = true }
+#url = { workspace = true }
+#async-trait = { workspace = true }
+#smallvec = "1.10"
+#dary_heap = "0.3"
+#bytes = { workspace = true }
+#hdrs = { git = "https://github.com/lakesoul-io/hdrs.git", branch = "main", features = ["async_file"], optional = true }
+#lazy_static = "1.4.0"
+#chrono = "0.4"
+#serde_json = "1.0"
+#tracing = "0.1.40"
+#proto = { path = "../proto" }
+#parking_lot = "0.12.1"
+#rand = { workspace = true }
+#half = { workspace = true }
+#anyhow = { workspace = true, features = [] }
 prost = "0.12.3"
-env_logger = "0.11"
+getrandom = { version = "0.2", features = ["js"] }
 
 
 [features]
-hdfs = ["dep:hdrs"]
-simd = ["datafusion/simd", "arrow/simd", "arrow-array/simd"]
-default = []
+#hdfs = ["dep:hdrs"]
+#simd = ["datafusion/simd", "arrow/simd", "arrow-array/simd"]
 
-[target.'cfg(target_os = "windows")'.dependencies]
-datafusion-substrait = { workspace = true }
+[target.'cfg(target_family = "windows")'.dependencies]
+#datafusion-substrait = { workspace = true }
 
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-datafusion-substrait = { workspace = true, features = ["protoc"] }
+[target.'cfg(not(target_family = "windows"))'.dependencies]
+#datafusion-substrait = { workspace = true, features = ["protoc"] }
 
 
+[target.'cfg(not(target_family="wasm"))'.dependencies]
+tokio = { version = "1.0", features = ["full"] }
+
+[target.'cfg(target_family="wasm")'.dependencies]
+tokio = { version = "1.0", features = ["sync", "macros", "io-util", "rt", "time"] }
 
 
 [dev-dependencies]
-tempfile = "3.3.0"
-comfy-table = "6.0"
-whoami = "1.3"
-rand = "0.8"
+#tempfile = "3.3.0"
+#comfy-table = "6.0"
+#whoami = "1.3"
+#rand = "0.8"
