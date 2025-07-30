@@ -1,0 +1,6 @@
+[
+{
+  "directory": "/home/maji/Projects/LakeSoul/cpp",
+  "arguments": ["/usr/sbin/gcc", "-c", "-m64", "-fvisibility=hidden", "-fvisibility-inlines-hidden", "-O3", "-Iinclude", "-I../.venv/lib/python3.8/site-packages/pyarrow/include", "-D_GLIBCXX_USE_CXX11_ABI=1", "-DNDEBUG", "-o", "build/.objs/main/linux/x86_64/release/src/main.cpp.o", "src/main.cpp"],
+  "file": "src/main.cpp"
+}]

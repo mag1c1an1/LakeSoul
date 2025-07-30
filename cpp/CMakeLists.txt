@@ -15,7 +15,7 @@ if(Python_VERSION VERSION_LESS 3.8)
 endif()
 
 # Create Python venv and install requirements
-set(VENV_DIR ${PROJECT_BINARY_DIR}/lakesoul/python-env/.env)
+set(VENV_DIR ${PROJECT_BINARY_DIR}/lakesoul/.venv)
 set(VENV_PYTHON ${VENV_DIR}/bin/python)
 set(VENV_CYTHON ${VENV_DIR}/bin/cython)
 if(NOT EXISTS ${VENV_PYTHON})
@@ -29,7 +29,7 @@ if(NOT EXISTS ${VENV_PYTHON})
     if(NOT rc EQUAL 0)
         message(FATAL_ERROR "Fail to upgrade Python venv pip")
     endif()
-    execute_process(COMMAND ${VENV_PYTHON} -m pip install -r ${PROJECT_SOURCE_DIR}/build-requirements.txt
+    execute_process(COMMAND ${VENV_PYTHON} -m pip install -r ${PROJECT_SOURCE_DIR}/build-requirements.txt -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
                     RESULT_VARIABLE rc)
     if(NOT rc EQUAL 0)
         message(FATAL_ERROR "Fail to install Python venv requirements")
@@ -97,10 +97,6 @@ execute_process(COMMAND ${Cargo_EXECUTABLE} --version
                 OUTPUT_VARIABLE cargo_version)
 if(NOT rc EQUAL 0)
     message(FATAL_ERROR "Fail to get Cargo version")
-endif()
-string(FIND "${cargo_version}" "-nightly" index)
-if(index EQUAL -1)
-    message(FATAL_ERROR "Cargo nightly required")
 endif()
 
 # Build liblakesoul_io_c.so

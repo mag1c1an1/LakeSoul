@@ -1,0 +1,17 @@
+add_rules("mode.debug", "mode.release")
+
+target("main")
+    add_files("src/*.cpp")
+    add_files("/home/maji/Projects/LakeSoul/.venv/lib/python3.8/site-packages/pyarrow/libarrow.so.1601")
+    add_includedirs("include")
+    add_includedirs("../.venv/lib/python3.8/site-packages/pyarrow/include")
+    add_defines("_GLIBCXX_USE_CXX11_ABI=1")
+target_end()
+
+-- target("arrow")
+--     set_kind("shared")
+--     add_files()
+--     add_includedirs("../.venv/lib/python3.8/site-packages/pyarrow/include", {interface = true})
+--     add_links("arrow")
+--     add_linkdirs("../.venv/lib/python3.8/site-packages/pyarrow")
+-- target_end()
