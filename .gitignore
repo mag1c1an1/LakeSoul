@@ -36,3 +36,5 @@ __pycache__/
 /wheelhouse/
 /rust/.idea
 .flattened-pom.xml
+
+**/.xmake/
