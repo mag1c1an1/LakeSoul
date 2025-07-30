@@ -1,0 +1,22 @@
+[project]
+name = "lakesoul-dataset"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "mag1c1an1", email = "mag1cian@icloud.com" }
+]
+requires-python = ">=3.8"
+dependencies = []
+
+[project.scripts]
+lakesoul-dataset = "lakesoul_dataset:main"
+
+[tool.maturin]
+module-name = "lakesoul_dataset._core"
+python-packages = ["lakesoul_dataset"]
+python-source = "src"
+
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
