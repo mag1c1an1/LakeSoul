@@ -19,6 +19,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <lakesoul/example.h>
+
 #include <arrow/csv/api.h>
 #include <arrow/io/api.h>
 #include <arrow/ipc/api.h>
@@ -26,10 +28,6 @@
 #include <arrow/result.h>
 #include <arrow/status.h>
 #include <arrow/table.h>
-
-#include <iostream>
-
-#include <lakesoul/example.h>
 
 #include <iostream>
 
@@ -67,10 +65,7 @@ Status run_main() {
 }
 namespace lakesoul {
 void arrow_main() { run_main(); }
+
+int add(int a, int b) { return a + b; }
+
 } // namespace lakesoul
-
-// namespace laeksoul {
-
-// void arrow_main() { run_main(); }
-
-// } // namespace laeksoul

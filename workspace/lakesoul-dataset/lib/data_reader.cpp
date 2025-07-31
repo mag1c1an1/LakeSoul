@@ -2,10 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-#include "data_reader.h"
+#include <lakesoul/data_reader.h>
 
-#include <arrow/record_batch.h>
+#include <arrow/c/bridge.h>
 #include <arrow/util/future.h>
+
 #include <filesystem>
 #include <iostream>
 #include <sstream>
@@ -20,7 +21,7 @@ LakeSoulDataReader::LakeSoulDataReader(
     const std::vector<std::pair<std::string, std::string>> &partition_info)
     : schema_(std::move(schema)), file_urls_(file_urls),
       primary_keys_(primary_keys), partition_info_(partition_info) {
-  lakesoul::rust_logger_init();
+  rust_logger_init();
 }
 
 int LakeSoulDataReader::GetBatchSize() const { return batch_size_; }
@@ -35,23 +36,20 @@ void LakeSoulDataReader::SetThreadNum(int thread_num) {
   thread_num_ = thread_num >= 1 ? thread_num : 1;
 }
 
-lakesoul::IOConfig *LakeSoulDataReader::CreateIOConfig() {
-  lakesoul::IOConfigBuilder *builder =
-      lakesoul::new_lakesoul_io_config_builder();
+IOConfig *LakeSoulDataReader::CreateIOConfig() {
+  IOConfigBuilder *builder = new_lakesoul_io_config_builder();
   for (const std::string &file_url : file_urls_) {
-    builder = lakesoul::lakesoul_config_builder_add_single_file(
-        builder, file_url.c_str());
+    builder =
+        lakesoul_config_builder_add_single_file(builder, file_url.c_str());
   }
 
   for (const std::string &pk : primary_keys_) {
-    builder = lakesoul::lakesoul_config_builder_add_single_primary_key(
-        builder, pk.c_str());
+    builder =
+        lakesoul_config_builder_add_single_primary_key(builder, pk.c_str());
   }
 
-  builder =
-      lakesoul::lakesoul_config_builder_set_batch_size(builder, batch_size_);
-  builder =
-      lakesoul::lakesoul_config_builder_set_thread_num(builder, thread_num_);
+  builder = lakesoul_config_builder_set_batch_size(builder, batch_size_);
+  builder = lakesoul_config_builder_set_thread_num(builder, thread_num_);
 
   // create projected schema: keep partition columns if retain_partition_columns
   // is true
@@ -84,7 +82,7 @@ lakesoul::IOConfig *LakeSoulDataReader::CreateIOConfig() {
     std::cerr << message << std::endl;
     throw std::runtime_error(message);
   }
-  builder = lakesoul::lakesoul_config_builder_set_schema(
+  builder = lakesoul_config_builder_set_schema(
       builder, reinterpret_cast<lakesoul::c_ptrdiff_t>(&c_schema));
 
   if (partition_fields.size() > 0 && retain_partition_columns_) {
@@ -115,36 +113,29 @@ lakesoul::IOConfig *LakeSoulDataReader::CreateIOConfig() {
   }
   if (!has_path_style_config) {
     // if this config is not specified by user, we always set it to true
-    builder = lakesoul::lakesoul_config_builder_set_object_store_option(
+    builder = lakesoul_config_builder_set_object_store_option(
         builder, "fs.s3a.path.style.access", "true");
   }
 
-  lakesoul::IOConfig *io_config =
-      lakesoul::create_lakesoul_io_config_from_builder(builder);
+  IOConfig *io_config = create_lakesoul_io_config_from_builder(builder);
   return io_config;
 }
 
-lakesoul::TokioRuntime *LakeSoulDataReader::CreateTokioRuntime() {
-  lakesoul::TokioRuntimeBuilder *builder =
-      lakesoul::new_tokio_runtime_builder();
-  builder =
-      lakesoul::tokio_runtime_builder_set_thread_num(builder, thread_num_);
-  lakesoul::TokioRuntime *tokio_runtime =
-      lakesoul::create_tokio_runtime_from_builder(builder);
+TokioRuntime *LakeSoulDataReader::CreateTokioRuntime() {
+  TokioRuntimeBuilder *builder = new_tokio_runtime_builder();
+  builder = tokio_runtime_builder_set_thread_num(builder, thread_num_);
+  TokioRuntime *tokio_runtime = create_tokio_runtime_from_builder(builder);
   return tokio_runtime;
 }
 
-std::shared_ptr<lakesoul::CResult<lakesoul::Reader>>
-LakeSoulDataReader::CreateReader() {
-  lakesoul::IOConfig *io_config = CreateIOConfig();
-  lakesoul::TokioRuntime *tokio_runtime = CreateTokioRuntime();
-  lakesoul::CResult<lakesoul::Reader> *result =
-      lakesoul::create_lakesoul_reader_from_config(io_config, tokio_runtime);
-  std::shared_ptr<lakesoul::CResult<lakesoul::Reader>> reader(
-      result, [](lakesoul::CResult<lakesoul::Reader> *ptr) {
-        lakesoul::free_lakesoul_reader(ptr);
-      });
-  const char *err = lakesoul::check_reader_created(result);
+std::shared_ptr<CResult<Reader>> LakeSoulDataReader::CreateReader() {
+  IOConfig *io_config = CreateIOConfig();
+  TokioRuntime *tokio_runtime = CreateTokioRuntime();
+  CResult<Reader> *result =
+      create_lakesoul_reader_from_config(io_config, tokio_runtime);
+  std::shared_ptr<CResult<Reader>> reader(
+      result, [](CResult<Reader> *ptr) { free_lakesoul_reader(ptr); });
+  const char *err = check_reader_created(result);
   if (err != nullptr) {
     std::ostringstream sout;
     sout << "Fail to create reader: " << err;
@@ -164,7 +155,7 @@ void LakeSoulDataReader::StartReader() {
   Closure closure;
   closure.reader = shared_from_this();
   closure.future = future;
-  lakesoul::start_reader_with_data(
+  start_reader_with_data(
       reader_.get(), &closure,
       +[](bool status, const char *err, const void *data) {
         Closure *closure = static_cast<Closure *>(const_cast<void *>(data));
@@ -203,7 +194,7 @@ LakeSoulDataReader::ReadRecordBatchAsync() {
   closure->future = future;
   Closure *closure_ptr = closure.release();
   const void *data = static_cast<const void *>(closure_ptr);
-  lakesoul::next_record_batch_with_data(
+  next_record_batch_with_data(
       reader_.get(),
       reinterpret_cast<lakesoul::c_ptrdiff_t>(&closure_ptr->c_arrow_schema),
       reinterpret_cast<lakesoul::c_ptrdiff_t>(&closure_ptr->c_arrow_array),

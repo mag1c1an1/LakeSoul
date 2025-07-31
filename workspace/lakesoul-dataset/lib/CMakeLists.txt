@@ -16,14 +16,20 @@ if(NOT rc EQUAL 0)
 endif()
 
 # Build liblakesoul_io_c.so
-# if(NOT EXISTS ${PROJECT_SOURCE_DIR}/../../rust/target/release/liblakesoul_io_c.so)
-#     execute_process(COMMAND ${Cargo_EXECUTABLE} build -r
-#                     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/../rust/lakesoul-io-c
-#                     RESULT_VARIABLE rc)
-#     if(NOT rc EQUAL 0)
-#         message(FATAL_ERROR "Fail to build liblakesoul_io_c.so")
-#     endif()
-# endif()
+
+message(${PROJECT_SOURCE_DIR})
+
+set(lakesoul_io_fullname liblakesoul_io_c${CMAKE_SHARED_LIBRARY_SUFFIX})
+
+
+if(NOT EXISTS ${PROJECT_SOURCE_DIR}/../../rust/target/release/${lakesoul_io_fullname})
+    execute_process(COMMAND ${Cargo_EXECUTABLE} build -r
+                    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/../../rust/lakesoul-io-c
+                    RESULT_VARIABLE rc)
+    if(NOT rc EQUAL 0)
+        message(FATAL_ERROR "Fail to build liblakesoul_io_c.so")
+    endif()
+endif()
 
 # # Build liblakesoul_metadata_c.so
 # if(NOT EXISTS ${PROJECT_SOURCE_DIR}/../rust/target/release/liblakesoul_metadata_c.so)
@@ -38,16 +44,21 @@ endif()
 # message(STATUS "Arrow version: ${ARROW_VERSION}")
 # message(STATUS "Arrow SO version: ${ARROW_FULL_SO_VERSION}")
 
-find_package(Arrow REQUIRED)
-add_library(lakesoul_dataset SHARED add.cpp example.cc)
+# Create CMake imported targets
+add_library(liblakesoul_io_c SHARED IMPORTED)
+set_target_properties(liblakesoul_io_c PROPERTIES
+    IMPORTED_LOCATION "${PROJECT_SOURCE_DIR}/../../rust/target/release/${lakesoul_io_fullname}"
+    INTERFACE_INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/../../rust/lakesoul-io-c"
+    IMPORTED_NO_SONAME TRUE)
 
+find_package(Arrow REQUIRED)
+add_library(lakesoul_dataset SHARED data_reader.cpp example.cpp)
 target_include_directories(lakesoul_dataset PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-
 target_link_libraries(lakesoul_dataset PUBLIC Arrow::arrow_shared)
-
+target_link_libraries(lakesoul_dataset PRIVATE liblakesoul_io_c)
 set_target_properties(lakesoul_dataset PROPERTIES
     INSTALL_RPATH "@loader_path"
     BUILD_WITH_INSTALL_RPATH TRUE
@@ -55,12 +66,6 @@ set_target_properties(lakesoul_dataset PROPERTIES
 
 install(TARGETS lakesoul_dataset DESTINATION ${SKBUILD_PROJECT_NAME})
 
-# # Create CMake imported targets
-# add_library(liblakesoul_io_c SHARED IMPORTED)
-# set_target_properties(liblakesoul_io_c PROPERTIES
-#     IMPORTED_LOCATION "${PROJECT_SOURCE_DIR}/../rust/target/release/liblakesoul_io_c.so"
-#     INTERFACE_INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/../rust/lakesoul-io-c"
-#     IMPORTED_NO_SONAME TRUE)
 
 # # add_library(libarrow SHARED IMPORTED)
 
@@ -106,5 +111,4 @@ install(TARGETS lakesoul_dataset DESTINATION ${SKBUILD_PROJECT_NAME})
 #             add.cpp
 #             )
 # # target_include_directories(lakesoul_dataset PRIVATE include)
-# target_link_libraries(lakesoul_dataset PRIVATE liblakesoul_io_c)
 # # set_target_properties(lakesoul_dataset PROPERTIES PREFIX "_")

@@ -5,5 +5,8 @@
 #pragma once
 
 namespace lakesoul {
+
 void arrow_main();
-}
+int add(int, int);
+
+} // namespace lakesoul
