@@ -1,0 +1,10 @@
+clean: 
+    uv clean
+    rm -rf build
+    uv pip uninstall lakesoul-dataset
+
+install:
+    uv pip install .
+
+run: install
+    uv run lakesoul-dataset
