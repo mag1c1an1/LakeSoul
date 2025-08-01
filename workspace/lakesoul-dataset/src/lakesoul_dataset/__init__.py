@@ -2,9 +2,11 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-import lakesoul_dataset.example as le
+
+from lakesoul_dataset._lakesoul_dataset import LakeSoulDataset, square
+
 
 def main():
-    y = le.square(3)
+    y = square(3)
     print("hello")
     print(y)

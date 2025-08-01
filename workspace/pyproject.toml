@@ -4,8 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [ "lakesoul-dataset", "pyarrow==16.1.0" ]
-
+dependencies = ["pyarrow==16.1.0"]
 
 [[project.authors]]
 name = "mag1c1an1"
@@ -17,18 +16,31 @@ url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
 default = true
 
 
-[tool.uv.workspace]
-members = [ "lakesoul-dataset" ]
+[dependency-groups]
+dev = ["pytest>=8.4.1"]
 
+[project.scripts]
+lakesoul = "lakesoul:main"
 
-[tool.uv.sources.lakesoul-dataset]
-workspace = true
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+build-dir = "build/{wheel_tag}"
 
+[tool.scikit-build.build]
+verbose = true
+
+[tool.scikit-build.logging]
+level = "DEBUG"
+
+[tool.scikit-build.cmake]
+args = ["-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"]
 
 [build-system]
-requires = [ "hatchling" ]
-build-backend = "hatchling.build"
-
-
-[dependency-groups]
-dev = [ "pytest>=8.4.1" ]
+requires = [
+    "scikit-build-core>=0.10",
+    "cython",
+    "pyarrow==16.1.0",
+    "numpy",
+    "grpcio[protobuf]~=1.57",
+]
+build-backend = "scikit_build_core.build"

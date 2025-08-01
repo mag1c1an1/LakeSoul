@@ -1,2 +1,16 @@
 pytest:
     uv run pytest -s
+
+clean: 
+    uv clean
+    rm -rf build
+    uv pip uninstall lakesoul
+
+install: clean
+    uv pip install .
+
+run: install
+    uv run lakesoul
+
+build:
+    LAKESOUL_SOURCE_DIR=$(pwd)/.. uv build

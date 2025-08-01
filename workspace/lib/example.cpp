@@ -64,7 +64,12 @@ Status run_main() {
   return Status::OK();
 }
 namespace lakesoul {
-void arrow_main() { run_main(); }
+void arrow_main() {
+  auto status = run_main();
+  if (!status.ok()) {
+    std::cerr << status.ToString() << std::endl;
+  }
+}
 
 int add(int a, int b) { return a + b; }
 

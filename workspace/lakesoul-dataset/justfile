@@ -3,7 +3,7 @@ clean:
     rm -rf build
     uv pip uninstall lakesoul-dataset
 
-install:
+install: clean
     uv pip install .
 
 run: install

@@ -6,12 +6,6 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 
-[manifest]
-members = [
-    "lakesoul",
-    "lakesoul-dataset",
-]
-
 [[package]]
 name = "colorama"
 version = "0.4.6"
@@ -47,7 +41,6 @@ name = "lakesoul"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "lakesoul-dataset" },
     { name = "pyarrow" },
 ]
 
@@ -57,24 +50,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "lakesoul-dataset", editable = "lakesoul-dataset" },
-    { name = "pyarrow", specifier = "==16.1.0" },
-]
+requires-dist = [{ name = "pyarrow", specifier = "==16.1.0" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.4.1" }]
-
-[[package]]
-name = "lakesoul-dataset"
-version = "0.1.0"
-source = { editable = "lakesoul-dataset" }
-dependencies = [
-    { name = "pyarrow" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "pyarrow", specifier = "==16.1.0" }]
 
 [[package]]
 name = "numpy"

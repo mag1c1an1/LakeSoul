@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [ "pyarrow==16.1.0" ]
+dependencies = ["pyarrow==16.1.0"]
 
 
 [[project.authors]]
@@ -26,13 +26,19 @@ verbose = true
 
 
 [tool.scikit-build.logging]
-level = "ERROR"
+level = "DEBUG"
 
 
 [tool.scikit-build.cmake]
-args = [ "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON" ]
+args = ["-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"]
 
 
 [build-system]
-requires = [ "scikit-build-core>=0.10", "cython" ]
+requires = [
+    "scikit-build-core>=0.10",
+    "cython",
+    "pyarrow==16.1.0",
+    "numpy",
+    "grpcio[protobuf]~=1.57",
+]
 build-backend = "scikit_build_core.build"
