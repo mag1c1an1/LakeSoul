@@ -2,17 +2,21 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-name: Manual Trigger Only 
+name: Publish to PyPI
 
 on:
-  push:
-    branches:
-      - 'py'
+  workflow_run:
+    workflows: ["CI with Python Test"]  # 依赖的工作流
+    branches: [main,release/**]   # 限制触发分支
+    tags: ["v*"]
+    types:
+      - completed                     # 在 CI with Python Test 完成后触发
   workflow_dispatch:
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     env:
       PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
     permissions:

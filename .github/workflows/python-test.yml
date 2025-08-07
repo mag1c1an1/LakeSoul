@@ -1,0 +1,76 @@
+name: CI with Python Test
+on:
+  workflow_run:
+    workflows: ["CI with Maven Test"]  # 依赖的工作流
+    branches: [main, release/**]   # 限制触发分支
+    types:
+      - completed                     # 在 CI with Python Test 完成后触发
+  workflow_dispatch:
+
+jobs:
+  run-pytest:
+    runs-on: ubuntu-latest
+    services:
+      # Label used to access the service container
+      postgres:
+        # Docker Hub image
+        image: postgres:14.5
+        # Provide the password for postgres
+        env:
+          POSTGRES_PASSWORD: lakesoul_test
+          POSTGRES_USER: lakesoul_test
+          POSTGRES_DB: lakesoul_test
+        # Set health checks to wait until postgres has started
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --name lakesoul-test-pg
+        ports:
+          # Maps tcp port 5432 on service container to the host
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          cache: maven
+      - name: Install psql
+        run: sudo apt-get install -y postgresql-client-16
+      - name: Init PG
+        run: |
+          ./script/meta_init_for_local_test.sh -j 2
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+        with:
+          version: "23.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: lakesoul-nativemetadata-x86_64-unknown-linux-gnu-maven-test
+          path: ./rust/target/release/
+      - uses: actions/download-artifact@v4
+        with:
+          name: lakesoul-nativeio-x86_64-unknown-linux-gnu-maven-test
+          path: ./rust/target/release/
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: build lakesoul-spark
+        run: |
+          mvn package -pl lakesoul-spark -DskipTests
+      - name: pytest
+        env:
+          LAKESOUL_SOURCE_DIR: ${{ github.workspace }}
+          LD_LIBRARY_PATH: $JAVA_HOME/lib/server
+        run: |
+          bash cpp/compile.sh
+          cp cpp/build/python/lakesoul/metadata/generated/entity_pb2.py python/lakesoul/metadata/generated
+          cp cpp/build/_lakesoul_dataset.so python/lakesoul/arrow
+          cp rust/target/release/liblakesoul_metadata_c.so python/lakesoul/metadata/lib/
+          uv sync
+          uv run pytest -s
+        
+
