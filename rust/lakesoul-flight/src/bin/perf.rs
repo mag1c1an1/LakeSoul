@@ -24,7 +24,7 @@ async fn main() {
     let create_sql = "
         CREATE EXTERNAL TABLE
         test_lfs
-        (p_partkey BIGINT NOT NULL, p_name STRING NOT NULL, p_mfgr STRING NOT NULL , p_brand STRING NOT NULL ,p_type STRING NOT NULL ,p_size INT NOT NULL ,p_container STRING NOT NULL ,p_retailprice DECIMAL(15,2) NOT NULL ,p_comment STRING NOT NULL)
+        (o_orderkey BIGINT NOT NULL, o_custkey BIGINT NOT NULL, o_orderstatus STRING NOT NULL , o_totalprice DECIMAL(15,2) NOT NULL ,o_orderdate DATE NOT NULL , o_orderpriority STRING NOT NULL ,o_clerk STRING NOT NULL ,o_shippriority INT NOT NULL ,o_comment STRING NOT NULL)
         STORED AS LAKESOUL
         LOCATION 'file:///data/LAKESOUL/test_lfs_data'
     ";
@@ -32,7 +32,7 @@ async fn main() {
     ctx.sql(create_sql).await.unwrap();
 
     let start = Instant::now();
-    let df = ctx.sql("select * from part").await.unwrap();
+    let df = ctx.sql("select * from orders").await.unwrap();
     let task_ctx = Arc::new(df.task_ctx());
     let plan = df.create_physical_plan().await.unwrap();
     let stream = execute_stream(plan, task_ctx).unwrap();

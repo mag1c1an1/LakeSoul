@@ -6,7 +6,8 @@
 import logging
 
 from e2e.lakesoul import (
-    SparkSQLOperator,
+    # SparkSQLOperator,
+    CompileOperator
     DataInitOperator,
     Schema,
     Field,
@@ -27,9 +28,9 @@ log = logging.getLogger(__name__)
 with DAG(
     dag_id="lakesoul-e2e",
 ) as dag:
-    # comp = CompileOperator(
-    #     repo_url="https://github.com/mag1c1an1/LakeSoul.git", branch="tmp_name"
-    # )
+    comp = CompileOperator(
+        repo_url="https://github.com/mag1c1an1/LakeSoul.git", branch="tmp_name"
+    )
 
     data_prefix = "jiax/lakesoul-e2e/data-init/"
     schema = Schema(

@@ -6,7 +6,7 @@ copy-to-java:
 log_level := "info"
 
 flight-sql level=log_level:
-    RUST_LOG=lakesoul_flight={{level}},lakesoul_metadata={{level}} JWT_AUTH_ENABLED=false RBAC_AUTH_ENABLED=false cargo run --release --bin flight_sql_server -- --worker-threads 8
+    RUST_LOG=lakesoul_flight={{level}},lakesoul_metadata={{level}} JWT_AUTH_ENABLED=false RBAC_AUTH_ENABLED=false cargo run --release --bin flight_sql_server -- --worker-threads 16 --throughput-limit 1000000000
 
 perf:
     cargo run --release --bin perf --config 'target."cfg(all())".runner="sudo -E"'
@@ -21,7 +21,7 @@ flight-sql-s3 level=log_level:
       --s3-secret-key "minioadmin1"
 
 clean-tpch:
-   rm -rf /tmp/lakesoul/tpch_data/*
+   rm -rf /data/LAKESOUL/tpch_data/*
 
 clean-log:
     rm -rf /tmp/lakesoul/logs/*
@@ -47,7 +47,7 @@ tpch-gen-s3:
 
 tpch-gen-lfs level=log_level:
    RUST_LOG={{level}} cargo run --release --bin lakesoul-console -- --worker-threads 16  \
-      tpch-gen -p "file:///tmp/lakesoul/tpch_data" --scale-factor 10.0 -n 8
+      tpch-gen -p "file:///data/LAKESOUL/tpch_data" --scale-factor 0.1 -n 16
 
 clean-meta:
     cargo test -p lakesoul-datafusion test_schema_to_sql
@@ -61,3 +61,9 @@ tpch-gen-s3-1 level=log_level:
       --s3-secret-key "minioadmin" tpch-gen -p "s3://lakesoul-bucket" --scale-factor 0.1 -n 8
 copy level=log_level:
    RUST_LOG={{level}} cargo run --release --bin lakesoul-console -- --worker-threads 16 --file copy.sql
+
+
+spark-shell:
+    LD_LIBRARY_PATH=$HADOOP_HOME/lib/native spark-shell --jars /home/jiax/.m2/repository/com/dmetasoul/lakesoul-spark/3.3-3.0.0-SNAPSHOT/lakesoul-spark-3.3-3.0.0-SNAPSHOT.jar \
+    --conf spark.sql.extensions=com.dmetasoul.lakesoul.sql.LakeSoulSparkSessionExtension \
+    --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.lakesoul.catalog.LakeSoulCatalog 
