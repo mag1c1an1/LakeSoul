@@ -92,7 +92,7 @@ impl PartitioningAsyncWriter {
                 .map(|f| {
                     schema
                         .index_of(f.name().as_str())
-                        .map_err(|e| DataFusionError::ArrowError(e, None))
+                        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))
                 })
                 .collect::<Result<Vec<usize>>>()?;
             let writer_schema = Arc::new(schema.project(proj_indices.borrow())?);

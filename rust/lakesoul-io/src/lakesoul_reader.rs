@@ -427,7 +427,9 @@ impl Iterator for SyncSendableMutableLakeSoulReader {
     fn next(&mut self) -> Option<Self::Item> {
         self.next_rb_blocked().map(|res| {
             res.map_err(|e| match e {
-                DataFusionError::ArrowError(arrow_error, _) => arrow_error,
+                DataFusionError::ArrowError(arrow_error, _) => {
+                    arrow_error.as_ref().clone()
+                }
                 other => ArrowError::ExternalError(format!("{other}").into()),
             })
         })

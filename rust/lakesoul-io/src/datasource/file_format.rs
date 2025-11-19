@@ -197,10 +197,10 @@ impl FileFormat for LakeSoulParquetFormat {
                     && old_val != &value
                 {
                     return Err(DataFusionError::ArrowError(
-                        ArrowError::SchemaError(format!(
+                        Box::new(ArrowError::SchemaError(format!(
                             "Fail to merge schema due to conflicting metadata. \
                                          Key '{key}' has different values '{old_val}' and '{value}'"
-                        )),
+                        ))),
                         None,
                     ));
                 }

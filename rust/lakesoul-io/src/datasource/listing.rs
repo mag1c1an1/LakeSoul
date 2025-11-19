@@ -169,7 +169,7 @@ impl TableProvider for LakeSoulTableProvider {
                                 <ListingTableUrl as AsRef<Url>>::as_ref(url).path(),
                             )?)
                             .await
-                            .map_err(ObjectStore)?,
+                            .map_err(|e|ObjectStore(Box::new(e)))?,
                     ))
                 }
             }))

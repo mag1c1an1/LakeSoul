@@ -275,7 +275,8 @@ pub(crate) fn build_sorted_stream_merger(
                 .collect::<Result<Vec<_>>>()?;
             let stream = RowCursorStream::try_new(
                 schema.as_ref(),
-                &LexOrdering::new(sort_exprs),
+                // already checked len(primary key) > 1
+                &LexOrdering::new(sort_exprs).unwrap(),
                 stream,
                 reservation.new_empty(),
             )?;
@@ -417,7 +418,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
         loop {
             match self.range_combiner.poll_result() {
                 RangeCombinerResult::Err(e) => {
-                    return Poll::Ready(Some(Err(ArrowError(e, None))));
+                    return Poll::Ready(Some(Err(ArrowError(Box::new(e), None))));
                 }
                 RangeCombinerResult::None => {
                     return Poll::Ready(None);
@@ -444,7 +445,9 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
                     // continue to produce range
                 }
                 RangeCombinerResult::RecordBatch(batch) => {
-                    return Poll::Ready(Some(batch.map_err(|e| ArrowError(e, None))));
+                    return Poll::Ready(Some(
+                        batch.map_err(|e| ArrowError(Box::new(e), None)),
+                    ));
                 }
             }
         }

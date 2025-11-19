@@ -30,20 +30,20 @@ version = "0.1.0"
 #lto = true
 
 [workspace.dependencies]
-datafusion = { version = "47.0.0" }
-datafusion-common = { version = "47.0.0" }
-datafusion-substrait = { version = "47.0.0" }
-datafusion-expr = { version = "47.0.0" }
-arrow = { version = "55.0.0" }
-arrow-schema = { version = "55.0.0" }
-arrow-array = { version = "55.0.0" }
-arrow-buffer = { version = "55.0.0" }
-arrow-cast = { version = "55.0.0" }
-arrow-arith = { version = "55.0.0" }
-arrow-ipc = { version = "55.0.0" }
-arrow-flight = { version = "55.0.0", features = ["flight-sql-experimental"] }
-arrow-pyarrow = { version = "55.0.0" }
-parquet = { version = "55.0.0" }
+datafusion = { version = "50" }
+datafusion-common = { version = "50" }
+datafusion-substrait = { version = "50" }
+datafusion-expr = { version = "50" }
+arrow = { version = "56" }
+arrow-schema = { version = "56" }
+arrow-array = { version = "56" }
+arrow-buffer = { version = "56" }
+arrow-cast = { version = "56" }
+arrow-arith = { version = "56" }
+arrow-ipc = { version = "56" }
+arrow-flight = { version = "56", features = ["flight-sql-experimental"] }
+arrow-pyarrow = { version = "56" }
+parquet = { version = "56" }
 object_store = { version = "0.12.0", features = ["aws", "http"] }
 
 tokio-stream = "0.1.9"
