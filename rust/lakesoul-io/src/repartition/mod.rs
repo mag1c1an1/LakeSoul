@@ -799,9 +799,9 @@ impl ExecutionPlan for RepartitionByRangeAndHashExec {
                     .with_fetch(fetch)
                     .with_reservation(merge_reservation);
                 if let Some(expr) = sort_exprs {
-                    builder.with_expressions(expr)
+                    builder.with_expressions(expr);
                 }
-                builder.build();
+                builder.build()
             } else {
                 Ok(Box::pin(RepartitionStream {
                     num_input_partitions,

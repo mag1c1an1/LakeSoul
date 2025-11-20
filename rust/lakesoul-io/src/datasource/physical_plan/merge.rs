@@ -26,7 +26,7 @@ use datafusion::physical_plan::{ExecutionPlanProperties, Partitioning, PlanPrope
 use datafusion::prelude::SessionContext;
 #[allow(deprecated)]
 use datafusion::{
-    datasource::physical_plan::{FileScanConfig, ParquetExec},
+    datasource::physical_plan::FileScanConfig,
     execution::TaskContext,
     physical_plan::{
         DisplayAs, DisplayFormatType, ExecutionPlan, PhysicalExpr,
