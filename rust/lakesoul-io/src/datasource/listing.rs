@@ -145,15 +145,15 @@ impl TableProvider for LakeSoulTableProvider {
             return Ok(Arc::new(EmptyExec::new(Arc::new(Schema::empty()))));
         };
         let statistics = Statistics::new_unknown(&self.schema());
-        let filters = if let Some(expr) = conjunction(filters.to_vec()) {
+        let x = datafusion::datasource::physical_plan::ParquetSource::default();
+        let filter = if let Some(expr) = conjunction(filters.to_vec()) {
             // NOTE: Use the table schema (NOT file schema) here because `expr` may contain references to partition columns.
             let table_df_schema = self.table_schema.as_ref().clone().to_dfschema()?;
-            let filters = datafusion::physical_expr::create_physical_expr(
+            Some(datafusion::physical_expr::create_physical_expr(
                 &expr,
                 &table_df_schema,
                 state.execution_props(),
-            )?;
-            Some(filters)
+            )?)
         } else {
             None
         };
@@ -195,7 +195,6 @@ impl TableProvider for LakeSoulTableProvider {
                     table_partition_cols: vec![],
                     batch_size: None,
                 },
-                filters.as_ref(),
             )
             .await
     }

@@ -817,7 +817,8 @@ impl ExecutionPlan for RepartitionByRangeAndHashExec {
     }
 
     fn statistics(&self) -> Result<Statistics> {
-        self.input.statistics()
+        // entire plan
+        self.input.partition_statistics(None)
     }
 }
 
