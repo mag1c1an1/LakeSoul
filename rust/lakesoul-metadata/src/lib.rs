@@ -30,7 +30,6 @@ pub use jwt::{Claims, JwtServer};
 mod metadata_client;
 mod pooled_client;
 pub mod rbac;
-
 pub mod utils;
 
 /// The offset of code for the Data Access Object type for query one.
@@ -1795,5 +1794,23 @@ mod tests {
         println!("{:?}", wrapper.namespace);
 
         Ok(())
+    }
+}
+
+mod mu_tests {
+    use rootcause::{Report, prelude::ResultExt, report};
+
+    #[test]
+    fn test() {
+        match list_users().context("list users") {
+            Err(e) => println!("failed to {e:?}"),
+            _ => {}
+        }
+    }
+    fn list_users() -> Result<(), Report> {
+        return Ok(http_get_users().context("load users from server")?);
+    }
+    fn http_get_users() -> Result<(), Report> {
+        Err(report!("some thing wrong"))
     }
 }
