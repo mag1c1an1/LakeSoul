@@ -18,11 +18,10 @@
 
 package org.apache.flink.table.runtime.arrow;
 
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.runtime.arrow.writers.ArrowFieldWriter;
 import org.apache.flink.util.Preconditions;
-
-import org.apache.arrow.vector.VectorSchemaRoot;
 
 /**
  * Writer which serializes the Flink rows to Arrow format.
@@ -40,7 +39,10 @@ public final class ArrowWriter<IN> {
      */
     private final ArrowFieldWriter<IN>[] fieldWriters;
 
-    public ArrowWriter(VectorSchemaRoot root, ArrowFieldWriter<IN>[] fieldWriters) {
+    public ArrowWriter(
+        VectorSchemaRoot root,
+        ArrowFieldWriter<IN>[] fieldWriters
+    ) {
         this.root = Preconditions.checkNotNull(root);
         this.fieldWriters = Preconditions.checkNotNull(fieldWriters);
     }
@@ -59,6 +61,7 @@ public final class ArrowWriter<IN> {
 
     /** Finishes the writing of the current row batch. */
     public void finish() {
+        System.out.println(fieldWriters[0].getCount());
         root.setRowCount(fieldWriters[0].getCount());
         for (ArrowFieldWriter<IN> fieldWriter : fieldWriters) {
             fieldWriter.finish();
