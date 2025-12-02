@@ -4,15 +4,13 @@
 
 //! Constant of LakeSoul IO
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::LazyLock};
 
 use arrow::array::ArrayRef;
 use arrow::compute::CastOptions;
 use arrow_array::{Array, new_empty_array, new_null_array};
 use arrow_cast::display::FormatOptions;
 use arrow_schema::DataType;
-
-use lazy_static::lazy_static;
 
 pub static LAKESOUL_TIMEZONE: &str = "UTC";
 pub static LAKESOUL_NULL_STRING: &str = "__L@KE$OUL_NULL__";
@@ -32,15 +30,16 @@ pub static TIMESTAMP_NANOSECOND_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.9f";
 
 pub static NUM_COLUMN_OPTIMIZE_THRESHOLD: usize = 200;
 
-lazy_static! {
-    pub static ref ARROW_CAST_OPTIONS: CastOptions<'static> = CastOptions {
+pub static LAKESOUL_BUF_CAPACITY: usize = 8 * 1024;
+
+pub static ARROW_CAST_OPTIONS: LazyLock<CastOptions<'static>> =
+    LazyLock::new(|| CastOptions {
         safe: false,
         format_options: FormatOptions::default(),
-    };
-}
+    });
 
 #[derive(Debug, Default)]
-pub struct ConstNullArray {
+struct ConstNullArray {
     inner: HashMap<DataType, ArrayRef>,
 }
 
@@ -70,7 +69,7 @@ impl ConstNullArray {
 }
 
 #[derive(Debug, Default)]
-pub struct ConstEmptyArray {
+struct ConstEmptyArray {
     inner: HashMap<DataType, ArrayRef>,
 }
 

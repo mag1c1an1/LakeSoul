@@ -2,20 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(dead_code)]
 //! LakeSoul IO Library
 //!
 //! This library provides functionality for reading and writing data in the LakeSoul format.
 //! It includes support for various file formats, optimized reading with primary keys,
 //! partitioned table support, and filter pushdown capabilities.
-//!
-//! # Dependencies
-//!
-//! The following external crates are re-exported for convenience:
-//!
-//! - [arrow](https://docs.rs/arrow/latest/arrow/) - Apache Arrow implementation for columnar data
-//! - [datafusion](https://docs.rs/datafusion/latest/datafusion/) - Query execution framework
-//! - [serde_json](https://docs.rs/serde_json/latest/serde_json/) - JSON serialization/deserialization
-//! - [tokio](https://docs.rs/tokio/latest/tokio/) - Asynchronous runtime
 //!
 //! # Examples
 //!
@@ -62,32 +54,38 @@
 #[macro_use]
 extern crate tracing;
 
-pub mod async_writer;
-pub mod datasource;
-pub mod filter;
-pub mod hash_utils;
-pub mod helpers;
-pub mod lakesoul_cache;
-pub mod lakesoul_io_config;
-pub mod lakesoul_reader;
-pub mod lakesoul_writer;
-pub mod local_sensitive_hash;
+// pub mod async_writer;
+// pub mod datasource;
+// pub mod filter;
+// pub mod hash_utils;
+// pub mod helpers;
+// pub mod lakesoul_cache;
+// pub mod lakesoul_io_config;
+// pub mod lakesoul_reader;
+// pub mod lakesoul_writer;
+// pub mod local_sensitive_hash;
 // mod projection;
-pub mod repartition;
-pub mod sorted_merge;
+// pub mod repartition;
+// pub mod sorted_merge;
 
 #[cfg(feature = "hdfs")]
 mod hdfs;
 
+mod config;
 pub mod constant;
-mod default_column_stream;
-mod transform;
+mod data_source;
+mod reader;
+mod session;
+mod writer;
 
-#[doc(inline)]
-pub use arrow;
-#[doc(inline)]
-pub use datafusion::{self, arrow::error::Result};
-#[doc(inline)]
-pub use serde_json;
-#[doc(inline)]
-pub use tokio;
+// mod default_column_stream;
+// mod transform;
+
+// #[doc(inline)]
+// pub use arrow;
+// #[doc(inline)]
+// pub use datafusion::{self, arrow::error::Result};
+// #[doc(inline)]
+// pub use serde_json;
+// #[doc(inline)]
+// pub use tokio;
