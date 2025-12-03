@@ -38,6 +38,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 
 use crate::config::IOConfig;
+use crate::writer::async_writer::AsyncBatchWriter;
 
 // use crate::async_writer::{
 //     AsyncBatchWriter, MultiPartAsyncWriter, PartitioningAsyncWriter, SortAsyncWriter,
@@ -50,7 +51,7 @@ use crate::config::IOConfig;
 
 mod async_writer;
 
-// pub type SendableWriter = Box<dyn AsyncBatchWriter + Send>;
+pub type SendableWriter = Box<dyn AsyncBatchWriter + Send>;
 
 pub async fn create_writer(
     config: IOConfig,
@@ -406,594 +407,606 @@ pub async fn create_writer(
 //     }
 // }
 
-// #[cfg(test)]
-// mod tests {
-//     use crate::{
-//         lakesoul_io_config::{LakeSoulIOConfigBuilder, OPTION_KEY_MEM_LIMIT},
-//         lakesoul_reader::LakeSoulReader,
-//         lakesoul_writer::{
-//             AsyncBatchWriter, MultiPartAsyncWriter, SyncSendableMutableLakeSoulWriter,
-//         },
-//     };
-//     use rand::distr::SampleString;
-
-//     use arrow::{
-//         array::{ArrayRef, Int64Array},
-//         record_batch::RecordBatch,
-//     };
-//     use arrow_array::{Array, StringArray};
-//     use arrow_schema::{DataType, Field, Schema, TimeUnit};
-//     use datafusion::error::Result;
-//     use parquet::arrow::arrow_reader::ParquetRecordBatchReader;
-//     use rand::Rng;
-//     use std::{fs::File, sync::Arc};
-//     use tokio::{runtime::Builder, time::Instant};
-//     use tracing_subscriber::layer::SubscriberExt;
-
-//     use super::SortAsyncWriter;
-//     use arrow::array::{Date32Array, Decimal128Array, TimestampMicrosecondArray};
-//     use chrono::{NaiveDate, NaiveDateTime};
-
-//     #[test]
-//     fn test_parquet_async_write() -> Result<()> {
-//         let runtime = Arc::new(Builder::new_multi_thread().enable_all().build().unwrap());
-//         runtime.clone().block_on(async move {
-//             let col = Arc::new(Int64Array::from_iter_values([3, 2, 1])) as ArrayRef;
-//             let to_write = RecordBatch::try_from_iter([("col", col)])?;
-//             let temp_dir = tempfile::tempdir()?;
-//             let path = temp_dir
-//                 .keep()
-//                 .join("test.parquet")
-//                 .into_os_string()
-//                 .into_string()
-//                 .unwrap();
-//             let writer_conf = LakeSoulIOConfigBuilder::new()
-//                 .with_files(vec![path.clone()])
-//                 .with_thread_num(2)
-//                 .with_batch_size(256)
-//                 .with_max_row_group_size(2)
-//                 .with_schema(to_write.schema())
-//                 .build();
-//             let mut async_writer = MultiPartAsyncWriter::try_new(writer_conf).await?;
-//             async_writer.write_record_batch(to_write.clone()).await?;
-//             Box::new(async_writer).flush_and_close().await?;
-
-//             let file = File::open(path.clone())?;
-//             let mut record_batch_reader =
-//                 ParquetRecordBatchReader::try_new(file, 1024).unwrap();
-
-//             let actual_batch = record_batch_reader
-//                 .next()
-//                 .expect("No batch found")
-//                 .expect("Unable to get batch");
-
-//             assert_eq!(to_write.schema(), actual_batch.schema());
-//             assert_eq!(to_write.num_columns(), actual_batch.num_columns());
-//             assert_eq!(to_write.num_rows(), actual_batch.num_rows());
-//             for i in 0..to_write.num_columns() {
-//                 let expected_data = to_write.column(i).to_data();
-//                 let actual_data = actual_batch.column(i).to_data();
-
-//                 assert_eq!(expected_data, actual_data);
-//             }
-
-//             let writer_conf = LakeSoulIOConfigBuilder::new()
-//                 .with_files(vec![path.clone()])
-//                 .with_thread_num(2)
-//                 .with_batch_size(256)
-//                 .with_max_row_group_size(2)
-//                 .with_schema(to_write.schema())
-//                 .with_primary_keys(vec!["col".to_string()])
-//                 .build();
-
-//             let async_writer = MultiPartAsyncWriter::try_new(writer_conf.clone()).await?;
-//             let mut async_writer = SortAsyncWriter::try_new(async_writer, writer_conf)?;
-//             async_writer.write_record_batch(to_write.clone()).await?;
-//             Box::new(async_writer).flush_and_close().await?;
-
-//             let file = File::open(path)?;
-//             let mut record_batch_reader =
-//                 ParquetRecordBatchReader::try_new(file, 1024).unwrap();
-
-//             let actual_batch = record_batch_reader
-//                 .next()
-//                 .expect("No batch found")
-//                 .expect("Unable to get batch");
-
-//             let col = Arc::new(Int64Array::from_iter_values([1, 2, 3])) as ArrayRef;
-//             let to_read = RecordBatch::try_from_iter([("col", col)])?;
-//             assert_eq!(to_read.schema(), actual_batch.schema());
-//             assert_eq!(to_read.num_columns(), actual_batch.num_columns());
-//             assert_eq!(to_read.num_rows(), actual_batch.num_rows());
-//             for i in 0..to_read.num_columns() {
-//                 let expected_data = to_read.column(i).to_data();
-//                 let actual_data = actual_batch.column(i).to_data();
-
-//                 assert_eq!(expected_data, actual_data);
-//             }
-//             Ok(())
-//         })
-//     }
-
-//     #[test]
-//     fn test_parquet_async_write_with_aux_sort() -> Result<()> {
-//         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-//         let col = Arc::new(Int64Array::from_iter_values([3, 2, 3])) as ArrayRef;
-//         let col1 = Arc::new(Int64Array::from_iter_values([5, 3, 2])) as ArrayRef;
-//         let col2 = Arc::new(Int64Array::from_iter_values([3, 2, 1])) as ArrayRef;
-//         let to_write =
-//             RecordBatch::try_from_iter([("col", col), ("col1", col1), ("col2", col2)])?;
-//         let temp_dir = tempfile::tempdir()?;
-//         let path = temp_dir
-//             .keep()
-//             .join("test.parquet")
-//             .into_os_string()
-//             .into_string()
-//             .unwrap();
-//         let writer_conf = LakeSoulIOConfigBuilder::new()
-//             .with_files(vec![path.clone()])
-//             .with_thread_num(2)
-//             .with_batch_size(256)
-//             .with_max_row_group_size(2)
-//             .with_schema(to_write.schema())
-//             .with_primary_keys(vec!["col".to_string()])
-//             .with_aux_sort_column("col2".to_string())
-//             .build();
-
-//         let mut writer =
-//             SyncSendableMutableLakeSoulWriter::try_new(writer_conf, runtime)?;
-//         writer.write_batch(to_write.clone())?;
-//         writer.flush_and_close()?;
-
-//         let file = File::open(path.clone())?;
-//         let mut record_batch_reader =
-//             ParquetRecordBatchReader::try_new(file, 1024).unwrap();
-
-//         let actual_batch = record_batch_reader
-//             .next()
-//             .expect("No batch found")
-//             .expect("Unable to get batch");
-//         let col = Arc::new(Int64Array::from_iter_values([2, 3, 3])) as ArrayRef;
-//         let col1 = Arc::new(Int64Array::from_iter_values([3, 2, 5])) as ArrayRef;
-//         let to_read = RecordBatch::try_from_iter([("col", col), ("col1", col1)])?;
-
-//         assert_eq!(to_read.schema(), actual_batch.schema());
-//         assert_eq!(to_read.num_columns(), actual_batch.num_columns());
-//         assert_eq!(to_read.num_rows(), actual_batch.num_rows());
-//         for i in 0..to_read.num_columns() {
-//             let expected_data = to_read.column(i).to_data();
-//             let actual_data = actual_batch.column(i).to_data();
-
-//             assert_eq!(expected_data, actual_data);
-//         }
-//         Ok(())
-//     }
-
-//     #[tokio::test]
-//     async fn test_s3_read_write() -> Result<()> {
-//         let common_conf_builder = LakeSoulIOConfigBuilder::new()
-//             .with_thread_num(2)
-//             .with_batch_size(8192)
-//             .with_max_row_group_size(250000)
-//             .with_object_store_option(
-//                 "fs.s3a.access.key".to_string(),
-//                 "minioadmin1".to_string(),
-//             )
-//             .with_object_store_option(
-//                 "fs.s3a.secret.key".to_string(),
-//                 "minioadmin1".to_string(),
-//             )
-//             .with_object_store_option(
-//                 "fs.s3a.endpoint".to_string(),
-//                 "http://localhost:9000".to_string(),
-//             );
-
-//         let read_conf = common_conf_builder
-//             .clone()
-//             .with_files(vec![
-//                 "s3://lakesoul-test-bucket/data/native-io-test/large_file.parquet"
-//                     .to_string(),
-//             ])
-//             .build();
-//         let mut reader = LakeSoulReader::new(read_conf)?;
-//         reader.start().await?;
-
-//         let schema = reader.schema.clone().unwrap();
-
-//         let write_conf = common_conf_builder
-//             .clone()
-//             .with_files(vec![
-//                 "s3://lakesoul-test-bucket/data/native-io-test/large_file_written.parquet".to_string(),
-//             ])
-//             .with_schema(schema)
-//             .build();
-//         let mut async_writer = MultiPartAsyncWriter::try_new(write_conf).await?;
-
-//         while let Some(rb) = reader.next_rb().await {
-//             let rb = rb?;
-//             async_writer.write_record_batch(rb).await?;
-//         }
-
-//         Box::new(async_writer).flush_and_close().await?;
-//         drop(reader);
-
-//         Ok(())
-//     }
-
-//     #[test]
-//     fn test_sort_spill_write() -> Result<()> {
-//         let runtime = Arc::new(Builder::new_multi_thread().enable_all().build().unwrap());
-//         runtime.clone().block_on(async move {
-//             let common_conf_builder = LakeSoulIOConfigBuilder::new()
-//                 .with_thread_num(2)
-//                 .with_batch_size(8192)
-//                 .with_max_row_group_size(250000);
-//             let read_conf = common_conf_builder
-//                 .clone()
-//                 .with_files(vec!["large_file.snappy.parquet".to_string()])
-//                 .with_schema(Arc::new(Schema::new(vec![
-//                     Arc::new(Field::new("uuid", DataType::Utf8, false)),
-//                     Arc::new(Field::new("ip", DataType::Utf8, false)),
-//                     Arc::new(Field::new("hostname", DataType::Utf8, false)),
-//                     Arc::new(Field::new("requests", DataType::Int64, false)),
-//                     Arc::new(Field::new("name", DataType::Utf8, false)),
-//                     Arc::new(Field::new("city", DataType::Utf8, false)),
-//                     Arc::new(Field::new("job", DataType::Utf8, false)),
-//                     Arc::new(Field::new("phonenum", DataType::Utf8, false)),
-//                 ])))
-//                 .build();
-//             let mut reader = LakeSoulReader::new(read_conf)?;
-//             reader.start().await?;
-
-//             let schema = reader.schema.clone().unwrap();
-
-//             let write_conf = common_conf_builder
-//                 .clone()
-//                 .with_files(vec![
-//                     "/home/chenxu/program/data/large_file_written.parquet".to_string(),
-//                 ])
-//                 .with_primary_key("uuid".to_string())
-//                 .with_schema(schema)
-//                 .build();
-//             let async_writer = MultiPartAsyncWriter::try_new(write_conf.clone()).await?;
-//             let mut async_writer = SortAsyncWriter::try_new(async_writer, write_conf)?;
-
-//             while let Some(rb) = reader.next_rb().await {
-//                 let rb = rb?;
-//                 async_writer.write_record_batch(rb).await?;
-//             }
-
-//             Box::new(async_writer).flush_and_close().await?;
-//             drop(reader);
-
-//             Ok(())
-//         })
-//     }
-
-//     #[test]
-//     fn test_s3_read_sort_write() -> Result<()> {
-//         let runtime = Arc::new(Builder::new_multi_thread().enable_all().build().unwrap());
-//         runtime.clone().block_on(async move {
-//             let common_conf_builder = LakeSoulIOConfigBuilder::new()
-//                 .with_thread_num(2)
-//                 .with_batch_size(8192)
-//                 .with_max_row_group_size(250000)
-//                 .with_object_store_option("fs.s3a.access.key".to_string(), "minioadmin1".to_string())
-//                 .with_object_store_option("fs.s3a.secret.key".to_string(), "minioadmin1".to_string())
-//                 .with_object_store_option("fs.s3a.endpoint".to_string(), "http://localhost:9000".to_string());
-
-//             let read_conf = common_conf_builder
-//                 .clone()
-//                 .with_files(vec![
-//                     "s3://lakesoul-test-bucket/data/native-io-test/large_file.parquet".to_string(),
-//                 ])
-//                 .build();
-//             let mut reader = LakeSoulReader::new(read_conf)?;
-//             reader.start().await?;
-
-//             let schema = reader.schema.clone().unwrap();
-
-//             let write_conf = common_conf_builder
-//                 .clone()
-//                 .with_files(vec![
-//                     "s3://lakesoul-test-bucket/data/native-io-test/large_file_written_sorted.parquet".to_string(),
-//                 ])
-//                 .with_schema(schema)
-//                 .with_primary_keys(vec!["str0".to_string(), "str1".to_string(), "int1".to_string()])
-//                 .build();
-//             let async_writer = MultiPartAsyncWriter::try_new(write_conf.clone()).await?;
-//             let mut async_writer = SortAsyncWriter::try_new(async_writer, write_conf)?;
-
-//             while let Some(rb) = reader.next_rb().await {
-//                 let rb = rb?;
-//                 async_writer.write_record_batch(rb).await?;
-//             }
-
-//             Box::new(async_writer).flush_and_close().await?;
-//             drop(reader);
-
-//             Ok(())
-//         })
-//     }
-
-//     fn create_batch(num_columns: usize, num_rows: usize, str_len: usize) -> RecordBatch {
-//         let mut rng = rand::rng();
-//         let mut len_rng = rand::rng();
-//         let iter = (0..num_columns)
-//             .into_iter()
-//             .map(|i| {
-//                 (
-//                     format!("col_{}", i),
-//                     Arc::new(StringArray::from(
-//                         (0..num_rows)
-//                             .into_iter()
-//                             .map(|_| {
-//                                 rand::distr::Alphanumeric.sample_string(
-//                                     &mut rng,
-//                                     len_rng.random_range(str_len..str_len * 3),
-//                                 )
-//                             })
-//                             .collect::<Vec<_>>(),
-//                     )) as ArrayRef,
-//                     true,
-//                 )
-//             })
-//             .collect::<Vec<_>>();
-//         RecordBatch::try_from_iter_with_nullable(iter).unwrap()
-//     }
-
-//     #[test]
-//     fn test_writer_of_large_columns() -> Result<()> {
-//         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-//         let num_batch = 39;
-//         let num_rows = 100;
-//         let num_columns = 2000;
-//         let str_len = 4;
-
-//         let to_write = create_batch(num_columns, num_rows, str_len);
-//         let temp_dir = tempfile::tempdir()?;
-//         let path = temp_dir
-//             .keep()
-//             .join("test.parquet")
-//             .into_os_string()
-//             .into_string()
-//             .unwrap();
-//         let writer_conf = LakeSoulIOConfigBuilder::new()
-//             .with_files(vec![path.clone()])
-//             .with_thread_num(2)
-//             .with_batch_size(num_rows)
-//             .with_max_row_group_size(2000)
-//             // .with_max_row_group_num_values(4_00_000)
-//             .with_schema(to_write.schema())
-//             // .with_primary_keys(vec!["col".to_string()])
-//             // .with_aux_sort_column("col2".to_string())
-//             .build();
-
-//         let mut writer =
-//             SyncSendableMutableLakeSoulWriter::try_new(writer_conf, runtime)?;
-
-//         let start = Instant::now();
-//         for _ in 0..num_batch {
-//             let once_start = Instant::now();
-//             writer.write_batch(create_batch(num_columns, num_rows, str_len))?;
-//             println!(
-//                 "write batch once cost: {}",
-//                 once_start.elapsed().as_millis()
-//             );
-//         }
-//         let flush_start = Instant::now();
-//         writer.flush_and_close()?;
-//         println!("flush cost: {}", flush_start.elapsed().as_millis());
-//         println!(
-//             "num_batch={}, num_columns={}, num_rows={}, str_len={}, cost_mills={}",
-//             num_batch,
-//             num_columns,
-//             num_rows,
-//             str_len,
-//             start.elapsed().as_millis()
-//         );
-
-//         let file = File::open(path.clone())?;
-//         let mut record_batch_reader =
-//             ParquetRecordBatchReader::try_new(file, 100_000).unwrap();
-
-//         let actual_batch = record_batch_reader
-//             .next()
-//             .expect("No batch found")
-//             .expect("Unable to get batch");
-
-//         assert_eq!(to_write.schema(), actual_batch.schema());
-//         assert_eq!(num_columns, actual_batch.num_columns());
-//         assert_eq!(num_rows * num_batch, actual_batch.num_rows());
-//         Ok(())
-//     }
-
-//     #[cfg(feature = "dhat-heap")]
-//     #[global_allocator]
-//     static ALLOC: dhat::Alloc = dhat::Alloc;
-
-//     #[tracing::instrument]
-//     #[test]
-//     fn writer_profiling() -> Result<()> {
-//         use tracing_subscriber::fmt;
-
-//         tracing_subscriber::fmt::init();
-
-//         let subscriber = fmt::layer().event_format(
-//             fmt::format::Format::default()
-//                 .with_level(true)
-//                 .with_source_location(true)
-//                 .with_file(true),
-//         );
-//         // .with_max_level(Level::TRACE);
-//         tracing_subscriber::registry().with(subscriber);
-
-//         #[cfg(feature = "dhat-heap")]
-//         let _profiler = dhat::Profiler::new_heap();
-
-//         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-//         let num_batch = 100;
-//         let num_rows = 1000;
-//         let num_columns = 100;
-//         let str_len = 4;
-
-//         let to_write = create_batch(num_columns, num_rows, str_len);
-//         let temp_dir = tempfile::tempdir()?;
-//         let path = temp_dir
-//             .keep()
-//             .join("test.parquet")
-//             .into_os_string()
-//             .into_string()
-//             .unwrap();
-//         let writer_conf = LakeSoulIOConfigBuilder::new()
-//             .with_files(vec![path.clone()])
-//             .with_prefix(
-//                 tempfile::tempdir()?
-//                     .keep()
-//                     .into_os_string()
-//                     .into_string()
-//                     .unwrap(),
-//             )
-//             .with_thread_num(2)
-//             .with_batch_size(num_rows)
-//             // .with_max_row_group_size(2000)
-//             // .with_max_row_group_num_values(4_00_000)
-//             .with_schema(to_write.schema())
-//             .with_primary_keys(
-//                 // (0..num_columns - 1)
-//                 (0..3)
-//                     .into_iter()
-//                     .map(|i| format!("col_{}", i))
-//                     .collect::<Vec<String>>(),
-//             )
-//             // .with_aux_sort_column("col2".to_string())
-//             .with_option(OPTION_KEY_MEM_LIMIT, format!("{}", 1024 * 1024 * 48))
-//             .set_dynamic_partition(true)
-//             .with_hash_bucket_num("4".to_string())
-//             // .with_max_file_size(1024 * 1024 * 32)
-//             .build();
-
-//         let mut writer =
-//             SyncSendableMutableLakeSoulWriter::try_new(writer_conf, runtime)?;
-
-//         let start = Instant::now();
-//         for _ in 0..num_batch {
-//             // let once_start = Instant::now();
-//             writer.write_batch(create_batch(num_columns, num_rows, str_len))?;
-//             // println!("write batch once cost: {}", once_start.elapsed().as_millis());
-//         }
-//         let flush_start = Instant::now();
-//         writer.flush_and_close()?;
-//         println!("flush cost: {}", flush_start.elapsed().as_millis());
-//         println!(
-//             "num_batch={}, num_columns={}, num_rows={}, str_len={}, cost_mills={}",
-//             num_batch,
-//             num_columns,
-//             num_rows,
-//             str_len,
-//             start.elapsed().as_millis()
-//         );
-
-//         // let file = File::open(path.clone())?;
-//         // let mut record_batch_reader = ParquetRecordBatchReader::try_new(file, 100_000).unwrap();
-
-//         // let actual_batch = record_batch_reader
-//         //     .next()
-//         //     .expect("No batch found")
-//         //     .expect("Unable to get batch");
-
-//         // assert_eq!(to_write.schema(), actual_batch.schema());
-//         // assert_eq!(num_columns, actual_batch.num_columns());
-//         // assert_eq!(num_rows * num_batch, actual_batch.num_rows());
-//         Ok(())
-//     }
-
-//     #[test]
-//     fn test_writer_with_complex_pk_types() -> Result<()> {
-//         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-
-//         // 创建测试数据
-//         let id1 = Arc::new(
-//             Decimal128Array::from_iter_values([
-//                 123456000, // 1234.56000
-//             ])
-//             .with_data_type(DataType::Decimal128(10, 5)),
-//         ) as ArrayRef;
-
-//         let id2 =
-//             Arc::new(Date32Array::from_iter_values([
-//                 NaiveDate::from_ymd_opt(2024, 2, 1)
-//                     .unwrap()
-//                     .signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
-//                     .num_days() as i32,
-//             ])) as ArrayRef;
-
-//         let id3 = Arc::new(
-//             TimestampMicrosecondArray::from_iter_values([NaiveDateTime::parse_from_str(
-//                 "2024-03-02 17:01:01.123456",
-//                 "%Y-%m-%d %H:%M:%S.%f",
-//             )
-//             .unwrap()
-//             .and_utc()
-//             .timestamp_micros()])
-//             .with_data_type(DataType::Timestamp(
-//                 TimeUnit::Microsecond,
-//                 Some(Arc::from("UTC")),
-//             )),
-//         ) as ArrayRef;
-
-//         let v = Arc::new(StringArray::from_iter(vec![Some("value2")])) as ArrayRef;
-
-//         let row_kinds = Arc::new(StringArray::from_iter_values(["insert"])) as ArrayRef;
-
-//         let schema = Arc::new(Schema::new(vec![
-//             Field::new("id1", DataType::Decimal128(10, 5), false),
-//             Field::new("id2", DataType::Date32, false),
-//             Field::new(
-//                 "id3",
-//                 DataType::Timestamp(TimeUnit::Microsecond, Some(Arc::from("UTC"))),
-//                 false,
-//             ),
-//             Field::new("v", DataType::Utf8, true),
-//             Field::new("rowKinds", DataType::Utf8, false),
-//         ]));
-
-//         let to_write =
-//             RecordBatch::try_new(schema.clone(), vec![id1, id2, id3, v, row_kinds])?;
-
-//         let temp_dir = tempfile::tempdir()?;
-//         let prefix = temp_dir
-//             .path()
-//             .join("test_pk_types")
-//             .into_os_string()
-//             .into_string()
-//             .unwrap();
-
-//         let writer_conf = LakeSoulIOConfigBuilder::new()
-//             .with_prefix(format!("file://{}", prefix))
-//             .with_thread_num(2)
-//             .with_batch_size(10240)
-//             .with_schema(schema)
-//             .with_primary_keys(vec![
-//                 "id1".to_string(),
-//                 "id2".to_string(),
-//                 "id3".to_string(),
-//             ])
-//             .with_hash_bucket_num("2".to_string())
-//             .set_dynamic_partition(true)
-//             .with_option(OPTION_KEY_MEM_LIMIT, format!("{}", 1024 * 1024 * 50))
-//             .build();
-
-//         let mut writer =
-//             SyncSendableMutableLakeSoulWriter::try_new(writer_conf, runtime)?;
-//         writer.write_batch(to_write.clone())?;
-//         let result = writer.flush_and_close()?;
-
-//         println!("result: {:?}", result);
-
-//         // 验证结果不为空
-//         assert!(result.len() > 1);
-
-//         Ok(())
-//     }
-// }
+#[cfg(test)]
+mod tests {
+
+    //     use rand::distr::SampleString;
+
+    //     use arrow::{
+    //         array::{ArrayRef, Int64Array},
+    //         record_batch::RecordBatch,
+    //     };
+    //     use arrow_array::{Array, StringArray};
+    //     use arrow_schema::{DataType, Field, Schema, TimeUnit};
+    //     use datafusion::error::Result;
+    //     use parquet::arrow::arrow_reader::ParquetRecordBatchReader;
+    //     use rand::Rng;
+    //     use std::{fs::File, sync::Arc};
+    //     use tokio::{runtime::Builder, time::Instant};
+    //     use tracing_subscriber::layer::SubscriberExt;
+
+    //     use super::SortAsyncWriter;
+    //     use arrow::array::{Date32Array, Decimal128Array, TimestampMicrosecondArray};
+    //     use chrono::{NaiveDate, NaiveDateTime};
+
+    use std::{fs::File, sync::Arc};
+
+    use arrow_array::{ArrayRef, Int64Array, RecordBatch};
+    use parking_lot::RwLock;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReader;
+    use rootcause::Report;
+    use tokio::runtime::Builder;
+
+    use crate::{
+        config::IOConfigBuilder,
+        writer::async_writer::{AsyncBatchWriter, MultiPartAsyncWriter, SortAsyncWriter},
+    };
+
+    #[test]
+    fn test_parquet_async_write() -> Result<(), Report> {
+        let runtime = Arc::new(Builder::new_multi_thread().enable_all().build().unwrap());
+        runtime.clone().block_on(async move {
+            let col = Arc::new(Int64Array::from_iter_values([3, 2, 1])) as ArrayRef;
+            let to_write = RecordBatch::try_from_iter([("col", col)])?;
+            let temp_dir = tempfile::tempdir()?;
+            let path = temp_dir
+                .keep()
+                .join("test.parquet")
+                .into_os_string()
+                .into_string()
+                .unwrap();
+            let writer_conf = Arc::new(RwLock::new(
+                IOConfigBuilder::new()
+                    .with_files(vec![path.clone()])
+                    .with_thread_num(2)
+                    .with_batch_size(256)
+                    .with_max_row_group_size(2)
+                    .with_schema(to_write.schema())
+                    .try_build()?,
+            ));
+            let mut async_writer = MultiPartAsyncWriter::try_new(writer_conf).await?;
+            async_writer.write_record_batch(to_write.clone()).await?;
+            Box::new(async_writer).flush_and_close().await?;
+
+            let file = File::open(path.clone())?;
+            let mut record_batch_reader =
+                ParquetRecordBatchReader::try_new(file, 1024).unwrap();
+
+            let actual_batch = record_batch_reader
+                .next()
+                .expect("No batch found")
+                .expect("Unable to get batch");
+
+            assert_eq!(to_write.schema(), actual_batch.schema());
+            assert_eq!(to_write.num_columns(), actual_batch.num_columns());
+            assert_eq!(to_write.num_rows(), actual_batch.num_rows());
+            for i in 0..to_write.num_columns() {
+                let expected_data = to_write.column(i).to_data();
+                let actual_data = actual_batch.column(i).to_data();
+
+                assert_eq!(expected_data, actual_data);
+            }
+
+            let writer_conf = Arc::new(RwLock::new(
+                IOConfigBuilder::new()
+                    .with_files(vec![path.clone()])
+                    .with_thread_num(2)
+                    .with_batch_size(256)
+                    .with_max_row_group_size(2)
+                    .with_schema(to_write.schema())
+                    .with_primary_keys(vec!["col".to_string()])
+                    .try_build()?,
+            ));
+
+            let async_writer = MultiPartAsyncWriter::try_new(writer_conf.clone()).await?;
+            let mut async_writer = SortAsyncWriter::try_new(async_writer, writer_conf)?;
+            async_writer.write_record_batch(to_write.clone()).await?;
+            Box::new(async_writer).flush_and_close().await?;
+
+            let file = File::open(path)?;
+            let mut record_batch_reader =
+                ParquetRecordBatchReader::try_new(file, 1024).unwrap();
+
+            let actual_batch = record_batch_reader
+                .next()
+                .expect("No batch found")
+                .expect("Unable to get batch");
+
+            let col = Arc::new(Int64Array::from_iter_values([1, 2, 3])) as ArrayRef;
+            let to_read = RecordBatch::try_from_iter([("col", col)])?;
+            assert_eq!(to_read.schema(), actual_batch.schema());
+            assert_eq!(to_read.num_columns(), actual_batch.num_columns());
+            assert_eq!(to_read.num_rows(), actual_batch.num_rows());
+            for i in 0..to_read.num_columns() {
+                let expected_data = to_read.column(i).to_data();
+                let actual_data = actual_batch.column(i).to_data();
+
+                assert_eq!(expected_data, actual_data);
+            }
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_parquet_async_write_with_aux_sort() -> Result<(), Report> {
+        todo!()
+        // let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+        // let col = Arc::new(Int64Array::from_iter_values([3, 2, 3])) as ArrayRef;
+        // let col1 = Arc::new(Int64Array::from_iter_values([5, 3, 2])) as ArrayRef;
+        // let col2 = Arc::new(Int64Array::from_iter_values([3, 2, 1])) as ArrayRef;
+        // let to_write =
+        //     RecordBatch::try_from_iter([("col", col), ("col1", col1), ("col2", col2)])?;
+        // let temp_dir = tempfile::tempdir()?;
+        // let path = temp_dir
+        //     .keep()
+        //     .join("test.parquet")
+        //     .into_os_string()
+        //     .into_string()
+        //     .unwrap();
+        // let writer_conf = OConfigBuilder::new()
+        //     .with_files(vec![path.clone()])
+        //     .with_thread_num(2)
+        //     .with_batch_size(256)
+        //     .with_max_row_group_size(2)
+        //     .with_schema(to_write.schema())
+        //     .with_primary_keys(vec!["col".to_string()])
+        //     .with_aux_sort_column("col2".to_string())
+        //     .build();
+
+        // let mut writer =
+        //     SyncSendableMutableLakeSoulWriter::try_new(writer_conf, runtime)?;
+        // writer.write_batch(to_write.clone())?;
+        // writer.flush_and_close()?;
+
+        // let file = File::open(path.clone())?;
+        // let mut record_batch_reader =
+        //     ParquetRecordBatchReader::try_new(file, 1024).unwrap();
+
+        // let actual_batch = record_batch_reader
+        //     .next()
+        //     .expect("No batch found")
+        //     .expect("Unable to get batch");
+        // let col = Arc::new(Int64Array::from_iter_values([2, 3, 3])) as ArrayRef;
+        // let col1 = Arc::new(Int64Array::from_iter_values([3, 2, 5])) as ArrayRef;
+        // let to_read = RecordBatch::try_from_iter([("col", col), ("col1", col1)])?;
+
+        // assert_eq!(to_read.schema(), actual_batch.schema());
+        // assert_eq!(to_read.num_columns(), actual_batch.num_columns());
+        // assert_eq!(to_read.num_rows(), actual_batch.num_rows());
+        // for i in 0..to_read.num_columns() {
+        //     let expected_data = to_read.column(i).to_data();
+        //     let actual_data = actual_batch.column(i).to_data();
+
+        //     assert_eq!(expected_data, actual_data);
+        // }
+        // Ok(())
+    }
+
+    //     #[tokio::test]
+    //     async fn test_s3_read_write() -> Result<()> {
+    //         let common_conf_builder = LakeSoulIOConfigBuilder::new()
+    //             .with_thread_num(2)
+    //             .with_batch_size(8192)
+    //             .with_max_row_group_size(250000)
+    //             .with_object_store_option(
+    //                 "fs.s3a.access.key".to_string(),
+    //                 "minioadmin1".to_string(),
+    //             )
+    //             .with_object_store_option(
+    //                 "fs.s3a.secret.key".to_string(),
+    //                 "minioadmin1".to_string(),
+    //             )
+    //             .with_object_store_option(
+    //                 "fs.s3a.endpoint".to_string(),
+    //                 "http://localhost:9000".to_string(),
+    //             );
+
+    //         let read_conf = common_conf_builder
+    //             .clone()
+    //             .with_files(vec![
+    //                 "s3://lakesoul-test-bucket/data/native-io-test/large_file.parquet"
+    //                     .to_string(),
+    //             ])
+    //             .build();
+    //         let mut reader = LakeSoulReader::new(read_conf)?;
+    //         reader.start().await?;
+
+    //         let schema = reader.schema.clone().unwrap();
+
+    //         let write_conf = common_conf_builder
+    //             .clone()
+    //             .with_files(vec![
+    //                 "s3://lakesoul-test-bucket/data/native-io-test/large_file_written.parquet".to_string(),
+    //             ])
+    //             .with_schema(schema)
+    //             .build();
+    //         let mut async_writer = MultiPartAsyncWriter::try_new(write_conf).await?;
+
+    //         while let Some(rb) = reader.next_rb().await {
+    //             let rb = rb?;
+    //             async_writer.write_record_batch(rb).await?;
+    //         }
+
+    //         Box::new(async_writer).flush_and_close().await?;
+    //         drop(reader);
+
+    //         Ok(())
+    //     }
+
+    //     #[test]
+    //     fn test_sort_spill_write() -> Result<()> {
+    //         let runtime = Arc::new(Builder::new_multi_thread().enable_all().build().unwrap());
+    //         runtime.clone().block_on(async move {
+    //             let common_conf_builder = LakeSoulIOConfigBuilder::new()
+    //                 .with_thread_num(2)
+    //                 .with_batch_size(8192)
+    //                 .with_max_row_group_size(250000);
+    //             let read_conf = common_conf_builder
+    //                 .clone()
+    //                 .with_files(vec!["large_file.snappy.parquet".to_string()])
+    //                 .with_schema(Arc::new(Schema::new(vec![
+    //                     Arc::new(Field::new("uuid", DataType::Utf8, false)),
+    //                     Arc::new(Field::new("ip", DataType::Utf8, false)),
+    //                     Arc::new(Field::new("hostname", DataType::Utf8, false)),
+    //                     Arc::new(Field::new("requests", DataType::Int64, false)),
+    //                     Arc::new(Field::new("name", DataType::Utf8, false)),
+    //                     Arc::new(Field::new("city", DataType::Utf8, false)),
+    //                     Arc::new(Field::new("job", DataType::Utf8, false)),
+    //                     Arc::new(Field::new("phonenum", DataType::Utf8, false)),
+    //                 ])))
+    //                 .build();
+    //             let mut reader = LakeSoulReader::new(read_conf)?;
+    //             reader.start().await?;
+
+    //             let schema = reader.schema.clone().unwrap();
+
+    //             let write_conf = common_conf_builder
+    //                 .clone()
+    //                 .with_files(vec![
+    //                     "/home/chenxu/program/data/large_file_written.parquet".to_string(),
+    //                 ])
+    //                 .with_primary_key("uuid".to_string())
+    //                 .with_schema(schema)
+    //                 .build();
+    //             let async_writer = MultiPartAsyncWriter::try_new(write_conf.clone()).await?;
+    //             let mut async_writer = SortAsyncWriter::try_new(async_writer, write_conf)?;
+
+    //             while let Some(rb) = reader.next_rb().await {
+    //                 let rb = rb?;
+    //                 async_writer.write_record_batch(rb).await?;
+    //             }
+
+    //             Box::new(async_writer).flush_and_close().await?;
+    //             drop(reader);
+
+    //             Ok(())
+    //         })
+    //     }
+
+    //     #[test]
+    //     fn test_s3_read_sort_write() -> Result<()> {
+    //         let runtime = Arc::new(Builder::new_multi_thread().enable_all().build().unwrap());
+    //         runtime.clone().block_on(async move {
+    //             let common_conf_builder = LakeSoulIOConfigBuilder::new()
+    //                 .with_thread_num(2)
+    //                 .with_batch_size(8192)
+    //                 .with_max_row_group_size(250000)
+    //                 .with_object_store_option("fs.s3a.access.key".to_string(), "minioadmin1".to_string())
+    //                 .with_object_store_option("fs.s3a.secret.key".to_string(), "minioadmin1".to_string())
+    //                 .with_object_store_option("fs.s3a.endpoint".to_string(), "http://localhost:9000".to_string());
+
+    //             let read_conf = common_conf_builder
+    //                 .clone()
+    //                 .with_files(vec![
+    //                     "s3://lakesoul-test-bucket/data/native-io-test/large_file.parquet".to_string(),
+    //                 ])
+    //                 .build();
+    //             let mut reader = LakeSoulReader::new(read_conf)?;
+    //             reader.start().await?;
+
+    //             let schema = reader.schema.clone().unwrap();
+
+    //             let write_conf = common_conf_builder
+    //                 .clone()
+    //                 .with_files(vec![
+    //                     "s3://lakesoul-test-bucket/data/native-io-test/large_file_written_sorted.parquet".to_string(),
+    //                 ])
+    //                 .with_schema(schema)
+    //                 .with_primary_keys(vec!["str0".to_string(), "str1".to_string(), "int1".to_string()])
+    //                 .build();
+    //             let async_writer = MultiPartAsyncWriter::try_new(write_conf.clone()).await?;
+    //             let mut async_writer = SortAsyncWriter::try_new(async_writer, write_conf)?;
+
+    //             while let Some(rb) = reader.next_rb().await {
+    //                 let rb = rb?;
+    //                 async_writer.write_record_batch(rb).await?;
+    //             }
+
+    //             Box::new(async_writer).flush_and_close().await?;
+    //             drop(reader);
+
+    //             Ok(())
+    //         })
+    //     }
+
+    //     fn create_batch(num_columns: usize, num_rows: usize, str_len: usize) -> RecordBatch {
+    //         let mut rng = rand::rng();
+    //         let mut len_rng = rand::rng();
+    //         let iter = (0..num_columns)
+    //             .into_iter()
+    //             .map(|i| {
+    //                 (
+    //                     format!("col_{}", i),
+    //                     Arc::new(StringArray::from(
+    //                         (0..num_rows)
+    //                             .into_iter()
+    //                             .map(|_| {
+    //                                 rand::distr::Alphanumeric.sample_string(
+    //                                     &mut rng,
+    //                                     len_rng.random_range(str_len..str_len * 3),
+    //                                 )
+    //                             })
+    //                             .collect::<Vec<_>>(),
+    //                     )) as ArrayRef,
+    //                     true,
+    //                 )
+    //             })
+    //             .collect::<Vec<_>>();
+    //         RecordBatch::try_from_iter_with_nullable(iter).unwrap()
+    //     }
+
+    //     #[test]
+    //     fn test_writer_of_large_columns() -> Result<()> {
+    //         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+    //         let num_batch = 39;
+    //         let num_rows = 100;
+    //         let num_columns = 2000;
+    //         let str_len = 4;
+
+    //         let to_write = create_batch(num_columns, num_rows, str_len);
+    //         let temp_dir = tempfile::tempdir()?;
+    //         let path = temp_dir
+    //             .keep()
+    //             .join("test.parquet")
+    //             .into_os_string()
+    //             .into_string()
+    //             .unwrap();
+    //         let writer_conf = LakeSoulIOConfigBuilder::new()
+    //             .with_files(vec![path.clone()])
+    //             .with_thread_num(2)
+    //             .with_batch_size(num_rows)
+    //             .with_max_row_group_size(2000)
+    //             // .with_max_row_group_num_values(4_00_000)
+    //             .with_schema(to_write.schema())
+    //             // .with_primary_keys(vec!["col".to_string()])
+    //             // .with_aux_sort_column("col2".to_string())
+    //             .build();
+
+    //         let mut writer =
+    //             SyncSendableMutableLakeSoulWriter::try_new(writer_conf, runtime)?;
+
+    //         let start = Instant::now();
+    //         for _ in 0..num_batch {
+    //             let once_start = Instant::now();
+    //             writer.write_batch(create_batch(num_columns, num_rows, str_len))?;
+    //             println!(
+    //                 "write batch once cost: {}",
+    //                 once_start.elapsed().as_millis()
+    //             );
+    //         }
+    //         let flush_start = Instant::now();
+    //         writer.flush_and_close()?;
+    //         println!("flush cost: {}", flush_start.elapsed().as_millis());
+    //         println!(
+    //             "num_batch={}, num_columns={}, num_rows={}, str_len={}, cost_mills={}",
+    //             num_batch,
+    //             num_columns,
+    //             num_rows,
+    //             str_len,
+    //             start.elapsed().as_millis()
+    //         );
+
+    //         let file = File::open(path.clone())?;
+    //         let mut record_batch_reader =
+    //             ParquetRecordBatchReader::try_new(file, 100_000).unwrap();
+
+    //         let actual_batch = record_batch_reader
+    //             .next()
+    //             .expect("No batch found")
+    //             .expect("Unable to get batch");
+
+    //         assert_eq!(to_write.schema(), actual_batch.schema());
+    //         assert_eq!(num_columns, actual_batch.num_columns());
+    //         assert_eq!(num_rows * num_batch, actual_batch.num_rows());
+    //         Ok(())
+    //     }
+
+    //     #[cfg(feature = "dhat-heap")]
+    //     #[global_allocator]
+    //     static ALLOC: dhat::Alloc = dhat::Alloc;
+
+    //     #[tracing::instrument]
+    //     #[test]
+    //     fn writer_profiling() -> Result<()> {
+    //         use tracing_subscriber::fmt;
+
+    //         tracing_subscriber::fmt::init();
+
+    //         let subscriber = fmt::layer().event_format(
+    //             fmt::format::Format::default()
+    //                 .with_level(true)
+    //                 .with_source_location(true)
+    //                 .with_file(true),
+    //         );
+    //         // .with_max_level(Level::TRACE);
+    //         tracing_subscriber::registry().with(subscriber);
+
+    //         #[cfg(feature = "dhat-heap")]
+    //         let _profiler = dhat::Profiler::new_heap();
+
+    //         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+    //         let num_batch = 100;
+    //         let num_rows = 1000;
+    //         let num_columns = 100;
+    //         let str_len = 4;
+
+    //         let to_write = create_batch(num_columns, num_rows, str_len);
+    //         let temp_dir = tempfile::tempdir()?;
+    //         let path = temp_dir
+    //             .keep()
+    //             .join("test.parquet")
+    //             .into_os_string()
+    //             .into_string()
+    //             .unwrap();
+    //         let writer_conf = LakeSoulIOConfigBuilder::new()
+    //             .with_files(vec![path.clone()])
+    //             .with_prefix(
+    //                 tempfile::tempdir()?
+    //                     .keep()
+    //                     .into_os_string()
+    //                     .into_string()
+    //                     .unwrap(),
+    //             )
+    //             .with_thread_num(2)
+    //             .with_batch_size(num_rows)
+    //             // .with_max_row_group_size(2000)
+    //             // .with_max_row_group_num_values(4_00_000)
+    //             .with_schema(to_write.schema())
+    //             .with_primary_keys(
+    //                 // (0..num_columns - 1)
+    //                 (0..3)
+    //                     .into_iter()
+    //                     .map(|i| format!("col_{}", i))
+    //                     .collect::<Vec<String>>(),
+    //             )
+    //             // .with_aux_sort_column("col2".to_string())
+    //             .with_option(OPTION_KEY_MEM_LIMIT, format!("{}", 1024 * 1024 * 48))
+    //             .set_dynamic_partition(true)
+    //             .with_hash_bucket_num("4".to_string())
+    //             // .with_max_file_size(1024 * 1024 * 32)
+    //             .build();
+
+    //         let mut writer =
+    //             SyncSendableMutableLakeSoulWriter::try_new(writer_conf, runtime)?;
+
+    //         let start = Instant::now();
+    //         for _ in 0..num_batch {
+    //             // let once_start = Instant::now();
+    //             writer.write_batch(create_batch(num_columns, num_rows, str_len))?;
+    //             // println!("write batch once cost: {}", once_start.elapsed().as_millis());
+    //         }
+    //         let flush_start = Instant::now();
+    //         writer.flush_and_close()?;
+    //         println!("flush cost: {}", flush_start.elapsed().as_millis());
+    //         println!(
+    //             "num_batch={}, num_columns={}, num_rows={}, str_len={}, cost_mills={}",
+    //             num_batch,
+    //             num_columns,
+    //             num_rows,
+    //             str_len,
+    //             start.elapsed().as_millis()
+    //         );
+
+    //         // let file = File::open(path.clone())?;
+    //         // let mut record_batch_reader = ParquetRecordBatchReader::try_new(file, 100_000).unwrap();
+
+    //         // let actual_batch = record_batch_reader
+    //         //     .next()
+    //         //     .expect("No batch found")
+    //         //     .expect("Unable to get batch");
+
+    //         // assert_eq!(to_write.schema(), actual_batch.schema());
+    //         // assert_eq!(num_columns, actual_batch.num_columns());
+    //         // assert_eq!(num_rows * num_batch, actual_batch.num_rows());
+    //         Ok(())
+    //     }
+
+    //     #[test]
+    //     fn test_writer_with_complex_pk_types() -> Result<()> {
+    //         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+
+    //         // 创建测试数据
+    //         let id1 = Arc::new(
+    //             Decimal128Array::from_iter_values([
+    //                 123456000, // 1234.56000
+    //             ])
+    //             .with_data_type(DataType::Decimal128(10, 5)),
+    //         ) as ArrayRef;
+
+    //         let id2 =
+    //             Arc::new(Date32Array::from_iter_values([
+    //                 NaiveDate::from_ymd_opt(2024, 2, 1)
+    //                     .unwrap()
+    //                     .signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
+    //                     .num_days() as i32,
+    //             ])) as ArrayRef;
+
+    //         let id3 = Arc::new(
+    //             TimestampMicrosecondArray::from_iter_values([NaiveDateTime::parse_from_str(
+    //                 "2024-03-02 17:01:01.123456",
+    //                 "%Y-%m-%d %H:%M:%S.%f",
+    //             )
+    //             .unwrap()
+    //             .and_utc()
+    //             .timestamp_micros()])
+    //             .with_data_type(DataType::Timestamp(
+    //                 TimeUnit::Microsecond,
+    //                 Some(Arc::from("UTC")),
+    //             )),
+    //         ) as ArrayRef;
+
+    //         let v = Arc::new(StringArray::from_iter(vec![Some("value2")])) as ArrayRef;
+
+    //         let row_kinds = Arc::new(StringArray::from_iter_values(["insert"])) as ArrayRef;
+
+    //         let schema = Arc::new(Schema::new(vec![
+    //             Field::new("id1", DataType::Decimal128(10, 5), false),
+    //             Field::new("id2", DataType::Date32, false),
+    //             Field::new(
+    //                 "id3",
+    //                 DataType::Timestamp(TimeUnit::Microsecond, Some(Arc::from("UTC"))),
+    //                 false,
+    //             ),
+    //             Field::new("v", DataType::Utf8, true),
+    //             Field::new("rowKinds", DataType::Utf8, false),
+    //         ]));
+
+    //         let to_write =
+    //             RecordBatch::try_new(schema.clone(), vec![id1, id2, id3, v, row_kinds])?;
+
+    //         let temp_dir = tempfile::tempdir()?;
+    //         let prefix = temp_dir
+    //             .path()
+    //             .join("test_pk_types")
+    //             .into_os_string()
+    //             .into_string()
+    //             .unwrap();
+
+    //         let writer_conf = LakeSoulIOConfigBuilder::new()
+    //             .with_prefix(format!("file://{}", prefix))
+    //             .with_thread_num(2)
+    //             .with_batch_size(10240)
+    //             .with_schema(schema)
+    //             .with_primary_keys(vec![
+    //                 "id1".to_string(),
+    //                 "id2".to_string(),
+    //                 "id3".to_string(),
+    //             ])
+    //             .with_hash_bucket_num("2".to_string())
+    //             .set_dynamic_partition(true)
+    //             .with_option(OPTION_KEY_MEM_LIMIT, format!("{}", 1024 * 1024 * 50))
+    //             .build();
+
+    //         let mut writer =
+    //             SyncSendableMutableLakeSoulWriter::try_new(writer_conf, runtime)?;
+    //         writer.write_batch(to_write.clone())?;
+    //         let result = writer.flush_and_close()?;
+
+    //         println!("result: {:?}", result);
+
+    //         // 验证结果不为空
+    //         assert!(result.len() > 1);
+
+    //         Ok(())
+    //     }
+}

@@ -8,25 +8,22 @@ use std::sync::Arc;
 
 use arrow_array::RecordBatch;
 use arrow_schema::{SchemaRef, SortOptions};
-use datafusion::{
-    physical_expr::{
-        LexOrdering, PhysicalSortExpr,
-        expressions::{Column, col},
-    },
-    physical_plan::{
-        ExecutionPlan, PhysicalExpr, projection::ProjectionExec, sorts::sort::SortExec,
-        stream::RecordBatchReceiverStream,
-    },
-};
-use datafusion_common::{DataFusionError, Result};
+
+use datafusion_common::DataFusionError;
+use datafusion_physical_expr::PhysicalExpr;
+use datafusion_physical_expr::expressions::col;
+use datafusion_physical_expr::{LexOrdering, PhysicalSortExpr, expressions::Column};
+use datafusion_physical_plan::projection::ProjectionExec;
+use datafusion_physical_plan::stream::RecordBatchReceiverStreamBuilder;
+use datafusion_physical_plan::{ExecutionPlan, sorts::sort::SortExec};
+use rootcause::{Report, bail};
 use tokio::{sync::mpsc::Sender, task::JoinHandle};
 use tokio_stream::StreamExt;
 
-use crate::{helpers::get_batch_memory_size, lakesoul_io_config::LakeSoulIOConfig};
+use crate::writer::async_writer::FlushOutputVec;
+use crate::{config::IOConfigRef, helpers::get_batch_memory_size};
 
-use super::{
-    AsyncBatchWriter, MultiPartAsyncWriter, ReceiverStreamExec, WriterFlushResult,
-};
+use super::{AsyncBatchWriter, MultiPartAsyncWriter, ReceiverStreamExec};
 
 /// Wrap the above async writer with a SortExec to
 /// sort the batches before write to async writer
@@ -34,13 +31,13 @@ pub struct SortAsyncWriter {
     /// The schema of the sort writer.
     schema: SchemaRef,
     /// The sender to async multi-part file writer.
-    sorter_sender: Sender<Result<RecordBatch>>,
+    sorter_sender: Sender<Result<RecordBatch, DataFusionError>>,
     /// The sort execution plan of the sort writer.
-    _sort_exec: Arc<dyn ExecutionPlan>,
+    sort_exec: Arc<dyn ExecutionPlan>,
     /// The join handle of the sort execution plan.
-    join_handle: Option<JoinHandle<Result<WriterFlushResult>>>,
+    join_handle: Option<JoinHandle<Result<FlushOutputVec, Report>>>,
     /// The external error of the sort execution plan.
-    err: Option<DataFusionError>,
+    err: Option<Report>,
     /// The buffered size of the sort writer.
     buffered_size: u64,
 }
@@ -48,56 +45,56 @@ pub struct SortAsyncWriter {
 impl SortAsyncWriter {
     pub fn try_new(
         async_writer: MultiPartAsyncWriter,
-        config: LakeSoulIOConfig,
-        // runtime: Arc<Runtime>,
-    ) -> Result<Self> {
-        // let _ = runtime.enter();
-        let schema = config.target_schema.0.clone();
+        config: IOConfigRef,
+    ) -> Result<Self, Report> {
+        let conf = config.read();
+        let schema = conf.target_schema.0.clone();
         let receiver_stream_builder =
-            RecordBatchReceiverStream::builder(schema.clone(), 8);
+            RecordBatchReceiverStreamBuilder::new(schema.clone(), conf.receiver_capacity);
         let tx = receiver_stream_builder.tx();
         let recv_exec = ReceiverStreamExec::new(receiver_stream_builder, schema.clone());
 
-        let sort_exprs: Vec<PhysicalSortExpr> = config
+        let sort_exprs: Vec<PhysicalSortExpr> = conf
             .primary_keys
             .iter()
             // add aux sort cols to sort expr
-            .chain(config.aux_sort_cols.iter())
+            .chain(conf.aux_sort_cols.iter())
             .map(|pk| {
-                let col = Column::new_with_schema(pk.as_str(), &config.target_schema.0)?;
+                let col = Column::new_with_schema(pk.as_str(), &conf.target_schema.0)?;
                 Ok(PhysicalSortExpr {
                     expr: Arc::new(col),
                     options: SortOptions::default(),
                 })
             })
-            .collect::<Result<Vec<PhysicalSortExpr>>>()?;
+            .collect::<Result<Vec<PhysicalSortExpr>, Report>>()?;
         let sort_exec = Arc::new(SortExec::new(
             LexOrdering::new(sort_exprs),
             Arc::new(recv_exec),
         ));
 
         // see if we need to prune aux sort cols
-        let exec_plan: Arc<dyn ExecutionPlan> = if config.aux_sort_cols.is_empty() {
+        let exec_plan: Arc<dyn ExecutionPlan> = if conf.aux_sort_cols.is_empty() {
             sort_exec
         } else {
             // O(nm), n = number of target schema fields, m = number of aux sort cols
-            let proj_expr: Vec<(Arc<dyn PhysicalExpr>, String)> = config
+            let proj_expr: Vec<(Arc<dyn PhysicalExpr>, String)> = conf
                 .target_schema
                 .0
                 .fields
                 .iter()
                 .filter_map(|f| {
-                    if config.aux_sort_cols.contains(f.name()) {
+                    if conf.aux_sort_cols.contains(f.name()) {
                         // exclude aux sort cols
                         None
                     } else {
                         Some(
-                            col(f.name().as_str(), &config.target_schema.0)
+                            col(f.name().as_str(), &conf.target_schema.0)
                                 .map(|e| (e, f.name().clone())),
                         )
                     }
                 })
-                .collect::<Result<Vec<(Arc<dyn PhysicalExpr>, String)>>>()?;
+                .collect::<Result<Vec<(Arc<dyn PhysicalExpr>, String)>, DataFusionError>>(
+                )?;
             Arc::new(ProjectionExec::try_new(proj_expr, sort_exec)?)
         };
 
@@ -127,12 +124,9 @@ impl SortAsyncWriter {
                         {
                             Ok(vec![])
                         }
-                        _ => Err(e),
+                        _ => Err(e.into()),
                     },
-                    Err(abort_err) => Err(DataFusionError::Internal(format!(
-                        "Abort failed {:?}, previous error {:?}",
-                        abort_err, e
-                    ))),
+                    Err(e) => Err(e),
                 }
             } else {
                 async_writer.flush_and_close().await
@@ -142,7 +136,7 @@ impl SortAsyncWriter {
         Ok(SortAsyncWriter {
             schema,
             sorter_sender: tx,
-            _sort_exec: exec_plan,
+            sort_exec: exec_plan,
             join_handle: Some(join_handle),
             err: None,
             buffered_size: 0,
@@ -152,12 +146,9 @@ impl SortAsyncWriter {
 
 #[async_trait::async_trait]
 impl AsyncBatchWriter for SortAsyncWriter {
-    async fn write_record_batch(&mut self, batch: RecordBatch) -> Result<()> {
+    async fn write_record_batch(&mut self, batch: RecordBatch) -> Result<(), Report> {
         if let Some(err) = &self.err {
-            return Err(DataFusionError::Internal(format!(
-                "SortAsyncWriter already failed with error {:?}",
-                err
-            )));
+            bail!("SortAsyncWriter already failed with error {}", err);
         }
 
         let memory_size = get_batch_memory_size(&batch)? as u64;
@@ -169,40 +160,31 @@ impl AsyncBatchWriter for SortAsyncWriter {
             // channel has been closed, indicating error happened during sort write
             Err(e) => {
                 if let Some(join_handle) = self.join_handle.take() {
-                    let result = join_handle
-                        .await
-                        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+                    let result = join_handle.await?;
                     self.err = result.err();
-                    Err(DataFusionError::Internal(format!(
-                        "Write to SortAsyncWriter failed: {:?}",
-                        self.err
-                    )))
+                    if let Some(e) = self.err.as_ref() {
+                        bail!("{}", e);
+                    }
+                    bail!("sort write");
                 } else {
-                    self.err = Some(DataFusionError::External(Box::new(e)));
-                    Err(DataFusionError::Internal(format!(
-                        "Write to SortAsyncWriter failed: {:?}",
-                        self.err
-                    )))
+                    self.err = Some(e.into());
+                    bail!("{}", self.err.as_ref().unwrap());
                 }
             }
         }
     }
 
-    async fn flush_and_close(self: Box<Self>) -> Result<WriterFlushResult> {
+    async fn flush_and_close(self: Box<Self>) -> Result<FlushOutputVec, Report> {
         if let Some(join_handle) = self.join_handle {
             let sender = self.sorter_sender;
             drop(sender);
-            join_handle
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?
+            join_handle.await?
         } else {
-            Err(DataFusionError::Internal(
-                "SortAsyncWriter has been aborted, cannot flush".to_string(),
-            ))
+            bail!("SortAsyncWriter has been aborted, cannot flush")
         }
     }
 
-    async fn abort_and_close(self: Box<Self>) -> Result<()> {
+    async fn abort_and_close(self: Box<Self>) -> Result<(), Report> {
         if let Some(join_handle) = self.join_handle {
             let sender = self.sorter_sender;
             // send abort signal to the task

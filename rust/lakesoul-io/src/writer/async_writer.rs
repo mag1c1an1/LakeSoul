@@ -4,42 +4,40 @@
 
 //! Module for the async writer implementation of LakeSoul.
 
-mod multipart_writer;
-// pub use multipart_writer::MultiPartAsyncWriter;
-
-// mod sort_writer;
-// pub use sort_writer::SortAsyncWriter;
-
-// mod partitioning_writer;
-// pub use partitioning_writer::PartitioningAsyncWriter;
-
-// mod sendable_writer;
-// pub use sendable_writer::AsyncSendableMutableLakeSoulWriter;
-
-// use arrow_array::RecordBatch;
-// use arrow_schema::SchemaRef;
-// use atomic_refcell::AtomicRefCell;
-// use datafusion::physical_expr::LexOrdering;
-// use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
-// use datafusion::{
-//     execution::{SendableRecordBatchStream, TaskContext},
-//     physical_expr::EquivalenceProperties,
-//     physical_plan::{
-//         DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties,
-//         Partitioning, PlanProperties, stream::RecordBatchReceiverStreamBuilder,
-//     },
-// };
-// use datafusion_common::{DataFusionError, Result};
-
+use std::any::Any;
+use std::fmt::{Debug, Formatter};
 use std::{io::Write, sync::Arc};
 
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use atomic_refcell::AtomicRefCell;
 use bytes::BytesMut;
+use datafusion_common::DataFusionError;
+use datafusion_execution::{SendableRecordBatchStream, TaskContext};
+use datafusion_physical_expr::{EquivalenceProperties, LexOrdering, Partitioning};
+use datafusion_physical_plan::{
+    DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties,
+};
+use datafusion_physical_plan::{
+    PlanProperties,
+    execution_plan::{Boundedness, EmissionType},
+    stream::RecordBatchReceiverStreamBuilder,
+};
 use object_store::ObjectMeta;
 use parquet::format::FileMetaData;
 use rootcause::Report;
+
+mod multipart_writer;
+pub use multipart_writer::MultiPartAsyncWriter;
+
+mod sort_writer;
+pub use sort_writer::SortAsyncWriter;
+
+mod partitioning_writer;
+pub use partitioning_writer::PartitioningAsyncWriter;
+
+mod sendable_writer;
+pub use sendable_writer::AsyncSendableMutableLakeSoulWriter;
 
 /// The result of a flush operation with format (partition_desc, file_path, object_meta, file_meta)
 pub type FlushOutputVec = Vec<FlusthOutput>;
@@ -95,105 +93,105 @@ impl Write for InMemBuf {
     }
 }
 
-// /// A [`datafusion::physical_plan::execution_plan::ExecutionPlan`] implementation for the receiver stream.
-// pub struct ReceiverStreamExec {
-//     receiver_stream_builder: AtomicRefCell<Option<RecordBatchReceiverStreamBuilder>>,
-//     schema: SchemaRef,
-//     properties: PlanProperties,
-// }
+/// A [`datafusion::physical_plan::execution_plan::ExecutionPlan`] implementation for the receiver stream.
+pub struct ReceiverStreamExec {
+    receiver_stream_builder: AtomicRefCell<Option<RecordBatchReceiverStreamBuilder>>,
+    schema: SchemaRef,
+    properties: PlanProperties,
+}
 
-// impl ReceiverStreamExec {
-//     pub fn new(
-//         receiver_stream_builder: RecordBatchReceiverStreamBuilder,
-//         schema: SchemaRef,
-//     ) -> Self {
-//         Self {
-//             receiver_stream_builder: AtomicRefCell::new(Some(receiver_stream_builder)),
-//             schema: schema.clone(),
-//             properties: PlanProperties::new(
-//                 EquivalenceProperties::new(schema),
-//                 Partitioning::UnknownPartitioning(1),
-//                 EmissionType::Incremental,
-//                 Boundedness::Bounded,
-//             ),
-//         }
-//     }
-// }
+impl ReceiverStreamExec {
+    pub fn new(
+        receiver_stream_builder: RecordBatchReceiverStreamBuilder,
+        schema: SchemaRef,
+    ) -> Self {
+        Self {
+            receiver_stream_builder: AtomicRefCell::new(Some(receiver_stream_builder)),
+            schema: schema.clone(),
+            properties: PlanProperties::new(
+                EquivalenceProperties::new(schema),
+                Partitioning::UnknownPartitioning(1),
+                EmissionType::Incremental,
+                Boundedness::Bounded,
+            ),
+        }
+    }
+}
 
-// impl Debug for ReceiverStreamExec {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "ReceiverStreamExec")
-//     }
-// }
+impl Debug for ReceiverStreamExec {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ReceiverStreamExec")
+    }
+}
 
-// impl DisplayAs for ReceiverStreamExec {
-//     fn fmt_as(
-//         &self,
-//         _t: DisplayFormatType,
-//         f: &mut std::fmt::Formatter,
-//     ) -> std::fmt::Result {
-//         write!(f, "ReceiverStreamExec")
-//     }
-// }
+impl DisplayAs for ReceiverStreamExec {
+    fn fmt_as(
+        &self,
+        _t: DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(f, "ReceiverStreamExec")
+    }
+}
 
-// impl ExecutionPlanProperties for ReceiverStreamExec {
-//     fn output_partitioning(&self) -> &Partitioning {
-//         &self.properties.partitioning
-//     }
+impl ExecutionPlanProperties for ReceiverStreamExec {
+    fn output_partitioning(&self) -> &Partitioning {
+        &self.properties.partitioning
+    }
 
-//     fn output_ordering(&self) -> Option<&LexOrdering> {
-//         None
-//     }
+    fn output_ordering(&self) -> Option<&LexOrdering> {
+        None
+    }
 
-//     fn boundedness(&self) -> Boundedness {
-//         Boundedness::Bounded
-//     }
+    fn boundedness(&self) -> Boundedness {
+        Boundedness::Bounded
+    }
 
-//     fn pipeline_behavior(&self) -> EmissionType {
-//         EmissionType::Incremental
-//     }
+    fn pipeline_behavior(&self) -> EmissionType {
+        EmissionType::Incremental
+    }
 
-//     fn equivalence_properties(&self) -> &EquivalenceProperties {
-//         &self.properties.eq_properties
-//     }
-// }
+    fn equivalence_properties(&self) -> &EquivalenceProperties {
+        &self.properties.eq_properties
+    }
+}
 
-// impl ExecutionPlan for ReceiverStreamExec {
-//     fn name(&self) -> &str {
-//         "ReceiverStreamExec"
-//     }
+impl ExecutionPlan for ReceiverStreamExec {
+    fn name(&self) -> &str {
+        "ReceiverStreamExec"
+    }
 
-//     fn as_any(&self) -> &dyn Any {
-//         self
-//     }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 
-//     fn schema(&self) -> SchemaRef {
-//         Arc::clone(&self.schema)
-//     }
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
 
-//     fn properties(&self) -> &PlanProperties {
-//         &self.properties
-//     }
+    fn properties(&self) -> &PlanProperties {
+        &self.properties
+    }
 
-//     fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
-//         unimplemented!()
-//     }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        unimplemented!()
+    }
 
-//     fn with_new_children(
-//         self: Arc<Self>,
-//         _children: Vec<Arc<dyn ExecutionPlan>>,
-//     ) -> Result<Arc<dyn ExecutionPlan>> {
-//         unimplemented!()
-//     }
+    fn with_new_children(
+        self: Arc<Self>,
+        _children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+        unimplemented!()
+    }
 
-//     fn execute(
-//         &self,
-//         _partition: usize,
-//         _context: Arc<TaskContext>,
-//     ) -> Result<SendableRecordBatchStream> {
-//         let builder = self.receiver_stream_builder.borrow_mut().take().ok_or(
-//             DataFusionError::Internal("empty receiver stream".to_string()),
-//         )?;
-//         Ok(builder.build())
-//     }
-// }
+    fn execute(
+        &self,
+        _partition: usize,
+        _context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream, DataFusionError> {
+        let builder = self.receiver_stream_builder.borrow_mut().take().ok_or(
+            DataFusionError::Internal("empty receiver stream".to_string()),
+        )?;
+        Ok(builder.build())
+    }
+}

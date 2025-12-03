@@ -7,34 +7,24 @@
 //! It includes functions for formatting scalar values, converting partition descriptions,
 //! and applying partition filters.
 
-use arrow::datatypes::UInt32Type;
-use arrow_array::{Array, RecordBatch, UInt32Array};
+use arrow_array::{Array, RecordBatch};
 use arrow_buffer::i256;
-use arrow_schema::{
-    ArrowError, DataType, Field, Schema, SchemaBuilder, SchemaRef, TimeUnit,
-};
+use arrow_schema::{ArrowError, DataType, Field, SchemaRef, TimeUnit};
 
 use chrono::{DateTime, Duration};
 use datafusion_common::DataFusionError;
-use datafusion_common::{DFSchema, ScalarValue, cast::as_primitive_array};
+use datafusion_common::{DFSchema, ScalarValue};
 use datafusion_datasource::ListingTableUrl;
 use datafusion_datasource::file_scan_config::FileScanConfig;
 use datafusion_expr::{Expr, Operator};
 use datafusion_physical_expr::{PhysicalExpr, PhysicalSortExpr};
 use datafusion_physical_plan::memory::LazyBatchGenerator;
-use futures::{StreamExt, TryStreamExt};
 use object_store::ObjectMeta;
-use object_store::path::Path;
 use parquet::format::FileMetaData;
-use proto::proto::entity::JniWrapper;
-use rand::distr::SampleString;
 use rootcause::{Report, bail, report};
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
-use std::iter::zip;
 use std::{collections::HashMap, fmt, sync::Arc};
-use tokio::runtime::Builder;
-use url::Url;
 
 use crate::constant::{
     DATE32_FORMAT, DEFAULT_PARTITION_DESC, FLINK_TIMESTAMP_FORMAT, LAKESOUL_COMMA,

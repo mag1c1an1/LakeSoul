@@ -28,13 +28,13 @@ use rootcause::{Report, bail, report};
 use std::sync::Arc;
 use url::Url;
 
-// An async writer using object_store's multi-part upload feature for cloud storage.
-// This writer uses a `VecDeque<u8>` as `std::io::Write` for arrow-rs's ArrowWriter.
-// Everytime when a new RowGroup is flushed, the length of the VecDeque would grow.
-// At this time, we pass the VecDeque as `bytes::Buf` to `AsyncWriteExt::write_buf` provided
-// by object_store, which would drain and copy the content of the VecDeque so that we could reuse it.
-// The `CloudMultiPartUpload` itself would try to concurrently upload parts, and
-// all parts will be committed to cloud storage by shutdown the `AsyncWrite` object.
+/// An async writer using object_store's multi-part upload feature for cloud storage.
+/// This writer uses a `VecDeque<u8>` as `std::io::Write` for arrow-rs's ArrowWriter.
+/// Everytime when a new RowGroup is flushed, the length of the VecDeque would grow.
+/// At this time, we pass the VecDeque as `bytes::Buf` to `AsyncWriteExt::write_buf` provided
+/// by object_store, which would drain and copy the content of the VecDeque so that we could reuse it.
+/// The `CloudMultiPartUpload` itself would try to concurrently upload parts, and
+/// all parts will be committed to cloud storage by shutdown the `AsyncWrite` object.
 pub struct MultiPartAsyncWriter {
     /// The task context of the multi-part async writer.
     task_ctx: Arc<TaskContext>,
@@ -145,10 +145,10 @@ impl MultiPartAsyncWriter {
         })
     }
 
-    // pub async fn try_new(mut config: LakeSoulIOConfig) -> Result<Self> {
-    //     let task_context = create_session_context(&mut config)?.task_ctx();
-    //     Self::try_new_with_context(&mut config, task_context).await
-    // }
+    pub async fn try_new(config: IOConfigRef) -> Result<Self, Report> {
+        let ctx = config.read().task_ctx();
+        Self::try_new_with_context(config, ctx).await
+    }
 
     async fn write_batch(
         batch: RecordBatch,

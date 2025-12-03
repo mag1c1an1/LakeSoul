@@ -204,7 +204,7 @@ pub fn register_hdfs_object_store(
 /// # Returns
 ///
 /// The normalized path string
-fn register_object_store(
+pub fn register_object_store(
     path: &str,
     config: &mut IOConfig,
     runtime: &RuntimeEnv,

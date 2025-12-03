@@ -87,7 +87,7 @@ tracing-subscriber = { version = "0.3.19", features = [
 test-log = "0.2.17"
 
 thiserror = "1.0"
-rootcause = "0.10"
+rootcause = {git = "https://github.com/rootcause-rs/rootcause.git",rev = "0a0ddc7"}
 
 http = "1.2.0"
 metrics = "0.21"

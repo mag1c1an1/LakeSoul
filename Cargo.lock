@@ -1976,7 +1976,7 @@ dependencies = [
  "proto",
  "rand",
  "regex",
- "rootcause",
+ "rootcause 0.10.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -2023,7 +2023,7 @@ dependencies = [
  "prost",
  "proto",
  "regex",
- "rootcause",
+ "rootcause 0.11.0",
  "serde",
  "serde_json",
  "test-log",
@@ -3040,7 +3040,21 @@ checksum = "12e6b4d9966d17c1e58cd682656e9e1551f19f421b07d7618723009445f06099"
 dependencies = [
  "hashbrown 0.16.0",
  "indexmap",
- "rootcause-internals",
+ "rootcause-internals 0.10.0",
+ "rustc-hash",
+ "spin",
+ "triomphe",
+ "unsize",
+]
+
+[[package]]
+name = "rootcause"
+version = "0.11.0"
+source = "git+https://github.com/rootcause-rs/rootcause.git?rev=0a0ddc7#0a0ddc77abfe22eef37a51962288943138a48d8c"
+dependencies = [
+ "hashbrown 0.16.0",
+ "indexmap",
+ "rootcause-internals 0.11.0",
  "rustc-hash",
  "spin",
  "triomphe",
@@ -3052,6 +3066,14 @@ name = "rootcause-internals"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac64da7400123d25e3603dfd91a0ce7a78a3ad6e2d9400e6cdbb1aef0574c0d7"
+dependencies = [
+ "triomphe",
+]
+
+[[package]]
+name = "rootcause-internals"
+version = "0.11.0"
+source = "git+https://github.com/rootcause-rs/rootcause.git?rev=0a0ddc7#0a0ddc77abfe22eef37a51962288943138a48d8c"
 dependencies = [
  "triomphe",
 ]
