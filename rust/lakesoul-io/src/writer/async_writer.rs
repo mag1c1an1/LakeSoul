@@ -30,21 +30,26 @@ mod multipart_writer;
 //     },
 // };
 // use datafusion_common::{DataFusionError, Result};
-// use parquet::format::FileMetaData;
-//
-struct FileMetaData;
 
-/// The result of a flush operation with format (partition_desc, file_path, object_meta, file_meta)
-pub type WriterFlushResult = Vec<(String, String, ObjectMeta, FileMetaData)>;
-
-use std::{collections::VecDeque, io::Write, sync::Arc};
+use std::{io::Write, sync::Arc};
 
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
+use atomic_refcell::AtomicRefCell;
 use bytes::BytesMut;
 use object_store::ObjectMeta;
+use parquet::format::FileMetaData;
 use rootcause::Report;
 
+/// The result of a flush operation with format (partition_desc, file_path, object_meta, file_meta)
+pub type FlushOutputVec = Vec<FlusthOutput>;
+
+pub struct FlusthOutput {
+    pub partition_desc: String,
+    pub file_path: String,
+    pub object_meta: ObjectMeta,
+    pub file_meta: FileMetaData,
+}
 /// The trait for the async batch writer.
 #[async_trait::async_trait]
 pub trait AsyncBatchWriter {
@@ -52,7 +57,7 @@ pub trait AsyncBatchWriter {
     async fn write_record_batch(&mut self, batch: RecordBatch) -> Result<(), Report>;
 
     /// Flush the writer and close it.
-    async fn flush_and_close(self: Box<Self>) -> Result<WriterFlushResult, Report>;
+    async fn flush_and_close(self: Box<Self>) -> Result<FlushOutputVec, Report>;
 
     /// Abort the writer and close it when an error occurs.
     async fn abort_and_close(self: Box<Self>) -> Result<(), Report>;
@@ -67,11 +72,20 @@ pub trait AsyncBatchWriter {
 }
 
 #[derive(Clone)]
-struct InMemBuf(BytesMut);
+struct InMemBuf(Arc<AtomicRefCell<BytesMut>>);
+
+impl InMemBuf {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(Arc::new(AtomicRefCell::new(BytesMut::with_capacity(
+            capacity,
+        ))))
+    }
+}
+
 impl Write for InMemBuf {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.extend_from_slice(buf);
+        self.0.borrow_mut().extend_from_slice(buf);
         Ok(buf.len())
     }
 

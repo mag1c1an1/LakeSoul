@@ -10,52 +10,56 @@ edition = "2024"
 [dependencies]
 proto = { path = "../proto" }
 
-object_store = { workspace = true }
-url = { workspace = true }
-
 datafusion-common = { workspace = true }
-datafusion-datasource = {workspace=true}
-datafusion-execution= {workspace=true}
-datafusion-physical-plan= {workspace=true}
+datafusion-session = {workspace = true}
+datafusion-expr = { workspace = true }
 datafusion-physical-expr = { workspace = true }
-parquet = { workspace = true, features = ["async", "arrow"] }
+datafusion-physical-plan= {workspace=true}
+datafusion-execution= {workspace=true}
+datafusion-datasource = {workspace=true}
 
-
-tokio-stream = { workspace = true }
-tokio = { workspace = true }
-tokio-util = { workspace = true }
-# derivative = { workspace = true }
-# atomic_refcell = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
 arrow-schema = { workspace = true, features = ["serde"] }
 arrow-array = { workspace = true, features = ["chrono-tz"] }
 arrow-buffer = { workspace = true }
 arrow-cast = { workspace = true }
+parquet = { workspace = true, features = ["async", "arrow"] }
+object_store = { workspace = true }
+
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+
 futures = { workspace = true }
+async-trait = { workspace = true }
 
 serde = { workspace = true }
 
-async-trait = { workspace = true }
+tracing = {workspace = true}
+url = { workspace = true }
+educe = { workspace = true ,features = ["Default"]}
+half = "2.7"
+atomic_refcell = "0.1"
+parking_lot = {workspace = true}
 # smallvec = "1.10"
 # dary_heap = "0.3"
 bytes = { workspace = true }
+
 hdrs = { git = "https://github.com/lakesoul-io/hdrs.git", branch = "main", features = ["async_file"], optional = true }
 hdfs-sys = { version = "0.3", default-features = false, features = ["hdfs_3_3"], optional = true }
-# lazy_static = "1.4.0"
-# chrono = "0.4"
+
+chrono =  {workspace = true}
+
 serde_json = { workspace = true }
-tracing.workspace = true
-# parking_lot = "0.12.1"
 rand = { workspace = true }
-# half = { workspace = true }
 prost = { workspace = true }
-# hex = "0.4"
+const-hex = "1.17"
 # dhat = { version = "0.3.3", optional = true }
 # ndarray = "0.15.6"
 #hdf5 = {version = "0.8.1"}
 # nohash = "0.2.0"
 # uuid = { workspace = true }
-# regex = "1.11.1"
+regex = "1.12"
 
 # num_cpus = "1.16"
 # filetime = "0.2.25"

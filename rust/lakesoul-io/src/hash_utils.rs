@@ -17,25 +17,13 @@ use datafusion_common::cast::{
 };
 use datafusion_common::{DataFusionError, Result};
 
-// use murmur3::murmur3_32;
-
-use self::spark_murmur3::spark_murmur3_32_for_bytes;
+use spark_murmur3::spark_murmur3_32_for_bytes;
 
 mod spark_murmur3;
+
 pub const HASH_SEED: u32 = 42;
 
-// // Combines two hashes into one hash
-// #[inline]
-// fn combine_hashes(l: u32, r: u32) -> u32 {
-//     let hash = (17 * 37u32).wrapping_add(l);
-//     hash.wrapping_mul(37).wrapping_add(r)
-// }
-
-fn hash_null(
-    // random_state: &RandomState,
-    hashes_buffer: &'_ mut [u32],
-    mul_col: bool,
-) {
+fn hash_null(hashes_buffer: &'_ mut [u32], mul_col: bool) {
     if mul_col {
         hashes_buffer.iter_mut().for_each(|hash| {
             // stable hash for null value
@@ -145,7 +133,6 @@ impl HashValue for IntervalMonthDayNano {
 /// with the new hash using `combine_hashes`
 fn hash_array_primitive<T>(
     array: &PrimitiveArray<T>,
-    // random_state: &RandomState,
     hashes_buffer: &mut [u32],
     rehash: bool,
 ) where
@@ -188,12 +175,8 @@ fn hash_array_primitive<T>(
 /// Hashes one array into the `hashes_buffer`
 /// If `rehash==true` this combines the previous hash value in the buffer
 /// with the new hash using `combine_hashes`
-fn hash_array<T>(
-    array: T,
-    // random_state: &RandomState,
-    hashes_buffer: &mut [u32],
-    rehash: bool,
-) where
+fn hash_array<T>(array: T, hashes_buffer: &mut [u32], rehash: bool)
+where
     T: ArrayAccessor,
     T::Item: HashValue,
 {
@@ -235,7 +218,6 @@ fn hash_array<T>(
 /// Hash the values in a dictionary array
 fn hash_dictionary<K: ArrowDictionaryKeyType>(
     array: &DictionaryArray<K>,
-    // random_state: &RandomState,
     hashes_buffer: &mut [u32],
     multi_col: bool,
 ) -> Result<()> {
@@ -269,7 +251,6 @@ fn hash_dictionary<K: ArrowDictionaryKeyType>(
 
 fn hash_list_array<OffsetSize>(
     array: &GenericListArray<OffsetSize>,
-    // random_state: &RandomState,
     hashes_buffer: &mut [u32],
 ) -> Result<()>
 where
@@ -311,7 +292,6 @@ where
 /// `hashes_buffer` should be pre-sized appropriately
 pub fn create_hashes<'a>(
     arrays: &[ArrayRef],
-    // random_state: &RandomState,
     hashes_buffer: &'a mut Vec<u32>,
 ) -> Result<&'a mut Vec<u32>> {
     for (i, col) in arrays.iter().enumerate() {
@@ -384,13 +364,8 @@ mod tests {
             .with_precision_and_scale(20, 3)
             .unwrap();
         let array_ref = Arc::new(array);
-        // let random_state = RandomState::with_seeds(0, 0, 0, 0);
         let hashes_buff = &mut vec![0; array_ref.len()];
-        let hashes = create_hashes(
-            &[array_ref],
-            // &random_state,
-            hashes_buff,
-        )?;
+        let hashes = create_hashes(&[array_ref], hashes_buff)?;
         assert_eq!(hashes.len(), 4);
         Ok(())
     }
@@ -400,20 +375,11 @@ mod tests {
         let f32_arr = Arc::new(Float32Array::from(vec![0.12, 0.5, 1f32, 444.7]));
         let f64_arr = Arc::new(Float64Array::from(vec![0.12, 0.5, 1f64, 444.7]));
 
-        // let random_state = RandomState::with_seeds(0, 0, 0, 0);
         let hashes_buff = &mut vec![0; f32_arr.len()];
-        let hashes = create_hashes(
-            &[f32_arr],
-            // &random_state,
-            hashes_buff,
-        )?;
+        let hashes = create_hashes(&[f32_arr], hashes_buff)?;
         assert_eq!(hashes.len(), 4,);
 
-        let hashes = create_hashes(
-            &[f64_arr],
-            // &random_state,
-            hashes_buff,
-        )?;
+        let hashes = create_hashes(&[f64_arr], hashes_buff)?;
         assert_eq!(hashes.len(), 4,);
 
         Ok(())
@@ -427,13 +393,8 @@ mod tests {
             &[1, 2, 3],
         ]));
 
-        // let random_state = RandomState::with_seeds(0, 0, 0, 0);
         let hashes_buff = &mut vec![0; byte_array.len()];
-        let hashes = create_hashes(
-            &[byte_array],
-            // &random_state,
-            hashes_buff,
-        )?;
+        let hashes = create_hashes(&[byte_array], hashes_buff)?;
         assert_eq!(hashes.len(), 3,);
 
         Ok(())
@@ -445,13 +406,8 @@ mod tests {
         let fixed_size_binary_array =
             Arc::new(FixedSizeBinaryArray::try_from_iter(input_arg.into_iter()).unwrap());
 
-        // let random_state = RandomState::with_seeds(0, 0, 0, 0);
         let hashes_buff = &mut vec![0; fixed_size_binary_array.len()];
-        let hashes = create_hashes(
-            &[fixed_size_binary_array],
-            // &random_state,
-            hashes_buff,
-        )?;
+        let hashes = create_hashes(&[fixed_size_binary_array], hashes_buff)?;
         assert_eq!(hashes.len(), 3,);
 
         Ok(())
@@ -470,23 +426,11 @@ mod tests {
                 .collect::<DictionaryArray<Int8Type>>(),
         );
 
-        // let random_state = RandomState::with_seeds(0, 0, 0, 0);
-
         let mut string_hashes = vec![0; strings.len()];
-        create_hashes(
-            &[string_array],
-            // &random_state,
-            &mut string_hashes,
-        )
-        .unwrap();
+        create_hashes(&[string_array], &mut string_hashes).unwrap();
 
         let mut dict_hashes = vec![0; strings.len()];
-        create_hashes(
-            &[dict_array],
-            // &random_state,
-            &mut dict_hashes,
-        )
-        .unwrap();
+        create_hashes(&[dict_array], &mut dict_hashes).unwrap();
 
         // Null values result in a zero hash,
         for (val, hash) in strings.iter().zip(string_hashes.iter()) {
@@ -523,14 +467,8 @@ mod tests {
         ];
         let list_array =
             Arc::new(ListArray::from_iter_primitive::<Int32Type, _, _>(data)) as ArrayRef;
-        // let random_state = RandomState::with_seeds(0, 0, 0, 0);
         let mut hashes = vec![0; list_array.len()];
-        create_hashes(
-            &[list_array],
-            // &random_state,
-            &mut hashes,
-        )
-        .unwrap();
+        create_hashes(&[list_array], &mut hashes).unwrap();
         assert_eq!(hashes[0], hashes[5]);
         assert_eq!(hashes[1], hashes[4]);
         assert_eq!(hashes[2], hashes[3]);
@@ -550,23 +488,11 @@ mod tests {
                 .collect::<DictionaryArray<Int32Type>>(),
         );
 
-        // let random_state = RandomState::with_seeds(0, 0, 0, 0);
-
         let mut one_col_hashes = vec![0; strings1.len()];
-        create_hashes(
-            &[dict_array.clone()],
-            // &random_state,
-            &mut one_col_hashes,
-        )
-        .unwrap();
+        create_hashes(&[dict_array.clone()], &mut one_col_hashes).unwrap();
 
         let mut two_col_hashes = vec![0; strings1.len()];
-        create_hashes(
-            &[dict_array, string_array],
-            // &random_state,
-            &mut two_col_hashes,
-        )
-        .unwrap();
+        create_hashes(&[dict_array, string_array], &mut two_col_hashes).unwrap();
 
         assert_eq!(one_col_hashes.len(), 3);
         assert_eq!(two_col_hashes.len(), 3);

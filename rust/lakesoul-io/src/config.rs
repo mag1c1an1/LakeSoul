@@ -1,14 +1,14 @@
-// // SPDX-FileCopyrightText: 2023 LakeSoul Contributors
-// //
-// // SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2023 LakeSoul Contributors
+//
+// SPDX-License-Identifier: Apache-2.0
 
-// //! LakeSoul IO Config Module
-// //!
-// //! This module provides functionality for configuring LakeSoul IO operations.
-// //! It includes configuration options for file paths, schema information, partitioning settings,
-// //! and performance tuning options.
-// //!
-// //!
+//! LakeSoul IO Config Module
+//!
+//! This module provides functionality for configuring LakeSoul IO operations.
+//! It includes configuration options for file paths, schema information, partitioning settings,
+//! and performance tuning options.
+//!
+//!
 // use std::{
 //     collections::HashMap,
 //     sync::{Arc, OnceLock},
@@ -83,19 +83,15 @@
 //         .clone()
 // }
 
-// #[derive(Debug, Derivative)]
-// #[derivative(Clone)]
-// pub struct IOSchema(pub(crate) SchemaRef);
+use std::{collections::HashMap, sync::Arc};
 
-// impl Default for IOSchema {
-//     fn default() -> Self {
-//         IOSchema(Arc::new(Schema::empty()))
-//     }
-// }
-
-use std::collections::HashMap;
+use arrow_schema::{Schema, SchemaRef};
+use datafusion_execution::{TaskContext, config::SessionConfig};
+use educe::Educe;
+use parking_lot::RwLock;
 
 mod object_store;
+// mod session;
 
 /// Key for keeping row order in output
 pub static OPTION_KEY_KEEP_ORDERS: &str = "keep_orders";
@@ -139,21 +135,32 @@ pub static OPTION_KEY_PATH_STYLE_ACCESS: &str = "fs.s3a.path.style.access";
 /// Key for object store signing algorithm
 pub static OPTION_KEY_OSS_SIGNING_ALGORITHM: &str = "fs.s3a.s3.signing-algorithm";
 
-#[derive(Debug)]
-// #[derivative(Default, Clone)]
-// /// Configuration for LakeSoul IO operations.
-// ///
-// /// This struct contains all the necessary parameters for configuring LakeSoul IO operations,
-// /// including file paths, schema information, partitioning settings, and performance tuning options.
+#[derive(Debug, Clone)]
+pub struct IOSchema(pub(crate) SchemaRef);
+
+impl Default for IOSchema {
+    fn default() -> Self {
+        IOSchema(Arc::new(Schema::empty()))
+    }
+}
+
+pub type IOConfigRef = Arc<RwLock<IOConfig>>;
+
+#[derive(Debug, Educe, Clone)]
+#[educe(Default)]
+/// Configuration for LakeSoul IO operations.
+///
+/// This struct contains all the necessary parameters for configuring LakeSoul IO operations,
+/// including file paths, schema information, partitioning settings, and performance tuning options.
 pub struct IOConfig {
-    //     /// Root directory path for files, unescaped
-    //     pub(crate) prefix: String,
-    //     /// List of file paths to read or write, unescaped
-    //     pub(crate) files: Vec<String>,
-    //     /// Names of primary key columns
-    //     pub(crate) primary_keys: Vec<String>,
-    //     /// Names of range partition columns
-    //     pub(crate) range_partitions: Vec<String>,
+    /// Root directory path for files, unescaped
+    pub(crate) prefix: String,
+    /// List of file paths to read or write, unescaped
+    pub(crate) files: Vec<String>,
+    /// Names of primary key columns
+    pub(crate) primary_keys: Vec<String>,
+    /// Names of range partition columns
+    pub(crate) range_partitions: Vec<String>,
     //     /// Number of hash buckets for hash partitioning
     //     #[derivative(Default(value = "1.to_string()"))]
     //     hash_bucket_num: String,
@@ -171,23 +178,23 @@ pub struct IOConfig {
     //     pub(crate) filter_protos: Vec<Plan>,
     //     /// Filter predicates as substrait raw buf
     //     pub(crate) filter_buf: Vec<Vec<u8>>,
-    //     /// Number of rows per batch for reading/writing
-    //     #[derivative(Default(value = "8192"))]
-    //     pub(crate) batch_size: usize,
-    //     /// Maximum number of rows per row group when writing
-    //     #[derivative(Default(value = "250000"))]
-    //     pub(crate) max_row_group_size: usize,
-    //     /// Maximum number of values per row group when writing
-    //     #[derivative(Default(value = "2147483647"))]
-    //     pub(crate) max_row_group_num_values: usize,
+    /// Number of rows per batch for reading/writing
+    #[educe(Default = 8192)]
+    pub(crate) batch_size: usize,
+    /// Maximum number of rows per row group when writing
+    #[educe(Default = 250_000)]
+    pub(crate) max_row_group_size: usize,
+    /// Maximum number of values per row group when writing
+    #[educe(Default = 2147483647)]
+    pub(crate) max_row_group_num_values: usize,
     //     /// Number of batches to prefetch
     //     #[derivative(Default(value = "1"))]
     //     pub(crate) prefetch_size: usize,
     //     /// Whether to enable Parquet filter pushdown
     //     #[derivative(Default(value = "false"))]
     //     pub(crate) parquet_filter_pushdown: bool,
-    //     /// Target Arrow schema for the reader and writer
-    //     pub(crate) target_schema: IOSchema,
+    /// Target Arrow schema for the reader and writer
+    pub(crate) target_schema: IOSchema,
     //     /// Arrow schema for partition columns
     //     pub(crate) partition_schema: IOSchema,
     /// Object store configuration options (e.g., S3 credentials)
@@ -221,6 +228,12 @@ pub struct IOConfig {
     //     /// Random number generator seed
     //     #[derivative(Default(value = "1234"))]
     //     pub(crate) seed: u64,
+    #[educe(Default = 16 * 1024)]
+    pub(crate) memory_buffer_capacity: usize,
+    #[educe(Default=128 * 1024 * 1024)]
+    pub(crate) multipart_chunk_size: usize,
+    /// task ctx for ffi reader/writer
+    task_ctx: Option<Arc<TaskContext>>,
 }
 
 impl IOConfig {
@@ -341,6 +354,15 @@ impl IOConfig {
     //         self.option(OPTION_KEY_STABLE_SORT)
     //             .is_some_and(|x| x.eq("true"))
     //     }
+    pub fn task_ctx(&self) -> Arc<TaskContext> {
+        todo!()
+    }
+}
+
+impl Into<SessionConfig> for &IOConfig {
+    fn into(self) -> SessionConfig {
+        todo!()
+    }
 }
 
 // #[derive(Derivative, Debug)]
@@ -744,121 +766,6 @@ impl IOConfigBuilder {
 //     fn from(val: LakeSoulIOConfig) -> Self {
 //         LakeSoulIOConfigBuilder { config: val }
 //     }
-// }
-
-// /// Creates a new session context
-// ///
-// /// # Arguments
-// ///
-// /// * `config` - A mutable reference to the LakeSoulIOConfig instance
-// ///
-// /// # Returns
-// ///
-// /// A new SessionContext instance
-// pub fn create_session_context(config: &mut LakeSoulIOConfig) -> Result<SessionContext> {
-//     create_session_context_with_planner(config, None)
-// }
-
-// /// Creates a new session context with a specific query planner
-// ///
-// /// # Arguments
-// ///
-// /// * `config` - A mutable reference to the LakeSoulIOConfig instance
-// /// * `planner` - An optional Arc<dyn QueryPlanner + Send + Sync> instance
-// ///
-// /// # Returns
-// ///
-// /// A new SessionContext instance
-// pub fn create_session_context_with_planner(
-//     config: &mut LakeSoulIOConfig,
-//     planner: Option<Arc<dyn QueryPlanner + Send + Sync>>,
-// ) -> Result<SessionContext> {
-//     let mut sess_conf = SessionConfig::default()
-//         .with_batch_size(config.batch_size)
-//         .with_parquet_pruning(true)
-//         // .with_prefetch(config.prefetch_size)
-//         .with_information_schema(true)
-//         .with_create_default_catalog_and_schema(true);
-
-//     sess_conf
-//         .options_mut()
-//         .optimizer
-//         .enable_round_robin_repartition = false; // if true, the record_batches poll from stream become unordered
-//     sess_conf.options_mut().optimizer.prefer_hash_join = false; //if true, panicked at 'range end out of bounds'
-//     sess_conf.options_mut().execution.parquet.pushdown_filters =
-//         config.parquet_filter_pushdown;
-//     sess_conf.options_mut().execution.target_partitions = 1;
-//     sess_conf.options_mut().execution.parquet.dictionary_enabled = Some(false);
-//     sess_conf
-//         .options_mut()
-//         .execution
-//         .parquet
-//         .schema_force_view_types = false;
-
-//     let mut runtime_conf = RuntimeEnvBuilder::new();
-//     if let Some(pool_size) = config.pool_size() {
-//         let memory_pool = FairSpillPool::new(pool_size);
-//         runtime_conf = runtime_conf.with_memory_pool(Arc::new(memory_pool));
-//     }
-//     let runtime = runtime_conf.build()?;
-
-//     // firstly, parse default fs if exist
-//     let default_fs = config
-//         .object_store_options
-//         .get("fs.defaultFS")
-//         .or_else(|| config.object_store_options.get("fs.default.name"))
-//         .cloned();
-//     if let Some(fs) = default_fs {
-//         config.default_fs = fs.clone();
-//         info!("NativeIO register default fs {}", fs);
-//         register_object_store(&fs, config, &runtime)?;
-//     };
-
-//     if !config.prefix.is_empty() {
-//         let prefix = config.prefix.clone();
-//         info!("NativeIO register prefix fs {}", prefix);
-//         let normalized_prefix = register_object_store(&prefix, config, &runtime)?;
-//         config.prefix = normalized_prefix;
-//     } else if let Ok(warehouse_prefix) = std::env::var("LAKESOUL_WAREHOUSE_PREFIX") {
-//         info!("NativeIO register warehouse prefix {}", warehouse_prefix);
-//         let normalized_prefix =
-//             register_object_store(&warehouse_prefix, config, &runtime)?;
-//         config.prefix = normalized_prefix;
-//     }
-//     debug!("{}", &config.prefix);
-
-//     // register object store(s) for input/output files' path
-//     // and replace file names with default fs concatenated if exist
-//     let files = config.files.clone();
-//     let normalized_filenames = files
-//         .into_iter()
-//         .map(|file_name| register_object_store(&file_name, config, &runtime))
-//         .collect::<Result<Vec<String>>>()?;
-//     config.files = normalized_filenames;
-//     info!("NativeIO normalized file names: {:?}", config.files);
-//     info!("NativeIO final config: {:?}", config);
-
-//     let builder = SessionStateBuilder::new()
-//         .with_config(sess_conf)
-//         .with_runtime_env(Arc::new(runtime));
-//     let builder = if let Some(planner) = planner {
-//         builder.with_query_planner(planner)
-//     } else {
-//         builder
-//     };
-//     // create session context
-//     // only keep projection/filter rules as others are unnecessary
-//     let state = builder
-//         .with_analyzer_rules(vec![Arc::new(TypeCoercion {})])
-//         .with_optimizer_rules(vec![
-//             Arc::new(PushDownFilter {}),
-//             Arc::new(OptimizeProjections {}),
-//             Arc::new(SimplifyExpressions {}),
-//         ])
-//         .with_physical_optimizer_rules(vec![Arc::new(ProjectionPushdown {})])
-//         .build();
-
-//     Ok(SessionContext::new_with_state(state))
 // }
 
 // #[cfg(test)]

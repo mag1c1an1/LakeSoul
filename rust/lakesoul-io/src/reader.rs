@@ -42,10 +42,9 @@
 
 // use datafusion::prelude::SessionContext;
 
-// use futures::StreamExt;
-// use tokio::runtime::Runtime;
-// use tokio::sync::Mutex;
-// use tokio::task::JoinHandle;
+use futures::StreamExt;
+use tokio::task::JoinHandle;
+use tokio::{runtime::Runtime, sync::Mutex};
 
 // use crate::datasource::file_format::LakeSoulParquetFormat;
 // use crate::datasource::listing::LakeSoulTableProvider;
@@ -63,9 +62,14 @@
 
 use std::sync::{Arc, RwLock};
 
-use rootcause::Report;
+use arrow_array::{RecordBatch, RecordBatchReader};
+use arrow_schema::{ArrowError, SchemaRef};
+use datafusion_datasource::source::DataSourceExec;
+use datafusion_execution::{SendableRecordBatchStream, TaskContext};
+use datafusion_physical_plan::execute_stream;
+use rootcause::{Report, report};
 
-use crate::config::IOConfig;
+use crate::{config::IOConfig, data_source::LakeSoulSource};
 
 // /// A reader for LakeSoul tables that supports efficient reading of data with various optimizations.
 // ///
@@ -104,22 +108,22 @@ use crate::config::IOConfig;
 // /// })
 // /// ```
 pub struct LakeSoulReader {
-    // sess_ctx: SessionContext,
+    task_ctx: Arc<TaskContext>,
     config: Arc<RwLock<IOConfig>>,
-    // stream: Option<SendableRecordBatchStream>,
-    // pub(crate) schema: Option<SchemaRef>,
+    stream: Option<SendableRecordBatchStream>,
+    pub(crate) schema: Option<SchemaRef>,
 }
 
 impl LakeSoulReader {
-    //     /// Creates a new LakeSoulReader with the given configuration.
-    //     ///
-    //     /// # Arguments
-    //     ///
-    //     /// * `config` - The configuration for the reader, including file paths, thread count, and batch size
-    //     ///
-    //     /// # Returns
-    //     ///
-    //     /// A Result containing the new LakeSoulReader instance
+    /// Creates a new LakeSoulReader with the given configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The configuration for the reader, including file paths, thread count, and batch size
+    ///
+    /// # Returns
+    ///
+    /// A Result containing the new LakeSoulReader instance
     pub fn new(config: IOConfig) -> Result<Self, Report> {
         // let sess_ctx = create_session_context(&mut config)?;
         // Ok(LakeSoulReader {
@@ -141,7 +145,7 @@ impl LakeSoulReader {
     /// # Returns
     ///
     /// A Result indicating success or failure of the initialization
-    #[instrument(level = "debug", skip(self))]
+    // #[instrument(level = "debug", skip(self))]
     pub async fn init(&mut self) -> Result<(), Report> {
         //         let target_schema: SchemaRef = self.config.target_schema.0.clone();
         //         if self.config.files.is_empty() {
@@ -263,182 +267,181 @@ impl LakeSoulReader {
         //                 )
         //                 .await?
         //             };
-        //             self.schema = Some(stream.schema());
-        //             self.stream = Some(stream);
-
+        let source = LakeSoulSource::new();
+        let plan = DataSourceExec::from_data_source(source);
+        let ctx = self
+            .config
+            .read()
+            .map_err(|_| report!("lock poisoned"))?
+            .task_ctx();
+        let stream = execute_stream(plan, ctx)?;
+        self.schema = Some(stream.schema());
+        self.stream = Some(stream);
         Ok(())
     }
 
-    //     /// Retrieves the next record batch from the reader.
-    //     ///
-    //     /// # Returns
-    //     ///
-    //     /// An Option containing a Result with the next RecordBatch, or None if there are no more batches
-    //     pub async fn next_rb(&mut self) -> Option<Result<RecordBatch>> {
-    //         if let Some(stream) = &mut self.stream {
-    //             stream.next().await
-    //         } else {
-    //             None
-    //         }
-    //     }
+    /// Retrieves the next record batch from the reader.
+    ///
+    /// # Returns
+    ///
+    /// An Option containing a Result with the next RecordBatch, or None if there are no more batches
+    pub async fn next_rb(&mut self) -> Option<Result<RecordBatch, Report>> {
+        if let Some(stream) = &mut self.stream {
+            stream.next().await.map(|res| res.map_err(Into::into))
+        } else {
+            None
+        }
+    }
 
-    //     pub fn stream(&mut self) -> Option<SendableRecordBatchStream> {
-    //         self.stream.take()
-    //     }
+    /// Get the inner stream
+    pub fn stream(&mut self) -> Option<SendableRecordBatchStream> {
+        self.stream.take()
+    }
 }
 
-// /// A thread-safe wrapper for LakeSoulReader that can be used in synchronous contexts.
-// ///
-// /// This wrapper provides methods to:
-// /// - Start the reader in a blocking fashion
-// /// - Read record batches using callbacks
-// /// - Access the reader's schema
-// ///
-// /// # Thread Safety
-// ///
-// /// This wrapper ensures thread-safe access to the underlying reader using Arc and Mutex.
-// ///
-// /// # Examples
-// ///
-// /// ```rust
-// /// use lakesoul_io::lakesoul_reader::SyncSendableMutableLakeSoulReader;
-// /// use tokio::runtime::Runtime;
-// ///
-// /// let runtime = Runtime::new()?;
-// /// let mut reader = SyncSendableMutableLakeSoulReader::new(lake_soul_reader, runtime);
-// /// reader.start_blocked()?;
-// ///
-// /// let (tx, rx) = std::sync::mpsc::channel(1);
-// /// reader.next_rb_callback(Box::new(move |batch| {
-// ///     tx.send(batch).unwrap();
-// /// }));
-// /// ```
+/// A thread-safe wrapper for LakeSoulReader that can be used in synchronous contexts.
+///
+/// This wrapper provides methods to:
+/// - Start the reader in a blocking fashion
+/// - Read record batches using callbacks
+/// - Access the reader's schema
+///
+/// # Thread Safety
+///
+/// This wrapper ensures thread-safe access to the underlying reader using Arc and Mutex.
+///
+/// # Examples
+///
+/// ```rust
+/// use lakesoul_io::lakesoul_reader::SyncSendableMutableLakeSoulReader;
+/// use tokio::runtime::Runtime;
+///
+/// let runtime = Runtime::new()?;
+/// let mut reader = SyncSendableMutableLakeSoulReader::new(lake_soul_reader, runtime);
+/// reader.start_blocked()?;
+///
+/// let (tx, rx) = std::sync::mpsc::channel(1);
+/// reader.next_rb_callback(Box::new(move |batch| {
+///     tx.send(batch).unwrap();
+/// }));
+/// ```
 pub struct SyncSendableMutableLakeSoulReader {
-    //     inner: Arc<AtomicRefCell<Mutex<LakeSoulReader>>>,
-    //     runtime: Arc<Runtime>,
-    //     schema: Option<SchemaRef>,
+    inner: Arc<Mutex<LakeSoulReader>>,
+    runtime: Arc<Runtime>, // for ffi
+    schema: Option<SchemaRef>,
 }
 
-// impl SyncSendableMutableLakeSoulReader {
-//     /// Creates a new SyncSendableMutableLakeSoulReader with the given reader and runtime.
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `reader` - The LakeSoulReader instance to wrap
-//     /// * `runtime` - The Tokio runtime to use for async operations
-//     pub fn new(reader: LakeSoulReader, runtime: Runtime) -> Self {
-//         SyncSendableMutableLakeSoulReader {
-//             inner: Arc::new(AtomicRefCell::new(Mutex::new(reader))),
-//             runtime: Arc::new(runtime),
-//             schema: None,
-//         }
-//     }
+impl SyncSendableMutableLakeSoulReader {
+    /// Creates a new SyncSendableMutableLakeSoulReader with the given reader and runtime.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The LakeSoulReader instance to wrap
+    /// * `runtime` - The Tokio runtime to use for async operations
+    pub fn new(reader: LakeSoulReader, runtime: Runtime) -> Self {
+        SyncSendableMutableLakeSoulReader {
+            inner: Arc::new(Mutex::new(reader)),
+            runtime: Arc::new(runtime),
+            schema: None,
+        }
+    }
 
-//     /// Starts the reader in a blocking fashion.
-//     ///
-//     /// # Returns
-//     ///
-//     /// A Result indicating success or failure of the initialization
-//     pub fn start_blocked(&mut self) -> Result<()> {
-//         let inner_reader = self.inner.clone();
-//         let runtime = self.get_runtime();
-//         runtime.block_on(async {
-//             let reader = inner_reader.borrow();
-//             let mut reader = reader.lock().await;
-//             reader.start().await?;
-//             self.schema = reader.schema.clone();
-//             Ok(())
-//         })
-//     }
+    /// Starts the reader in a blocking fashion.
+    ///
+    /// # Returns
+    ///
+    /// A Result indicating success or failure of the initialization
+    pub fn init_blocked(&mut self) -> Result<(), Report> {
+        let inner_reader = self.inner.clone();
+        let runtime = self.runtime();
+        runtime.block_on(async {
+            let mut reader = inner_reader.lock().await;
+            reader.init().await?;
+            self.schema = reader.schema.clone();
+            Ok(())
+        })
+    }
 
-//     /// Registers a callback to be called with the next record batch.
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `f` - The callback function to be called with the next batch
-//     ///
-//     /// # Returns
-//     ///
-//     /// A JoinHandle that can be used to wait for the callback to complete
-//     pub fn next_rb_callback(
-//         &self,
-//         f: Box<dyn FnOnce(Option<Result<RecordBatch>>) + Send + Sync>,
-//     ) -> JoinHandle<()> {
-//         let inner_reader = self.get_inner_reader();
-//         let runtime = self.get_runtime();
-//         runtime.spawn(async move {
-//             let reader = inner_reader.borrow();
-//             let mut reader = reader.lock().await;
-//             let rb = reader.next_rb().await;
-//             f(rb);
-//         })
-//     }
+    /// Registers a callback to be called with the next record batch.
+    ///
+    /// # Arguments
+    ///
+    /// * `f` - The callback function to be called with the next batch
+    ///
+    /// # Returns
+    ///
+    /// A JoinHandle that can be used to wait for the callback to complete
+    pub fn next_rb_callback(
+        &self,
+        f: Box<dyn FnOnce(Option<Result<RecordBatch, Report>>) + Send + Sync>,
+    ) -> JoinHandle<()> {
+        let inner_reader = self.reader();
+        let runtime = self.runtime();
+        runtime.spawn(async move {
+            let mut reader = inner_reader.lock().await;
+            let rb = reader.next_rb().await;
+            f(rb);
+        })
+    }
 
-//     /// Retrieves the next record batch in a blocking fashion.
-//     ///
-//     /// # Returns
-//     ///
-//     /// An Option containing a Result with the next RecordBatch, or None if there are no more batches
-//     pub fn next_rb_blocked(
-//         &self,
-//     ) -> Option<std::result::Result<RecordBatch, DataFusionError>> {
-//         let current_time = std::time::Instant::now();
-//         let inner_reader = self.get_inner_reader();
-//         let runtime = self.get_runtime();
-//         let res = runtime.block_on(async move {
-//             let reader = inner_reader.borrow();
-//             let mut reader = reader.lock().await;
-//             reader.next_rb().await
-//         });
-//         let duration = (std::time::Instant::now() - current_time).as_millis();
-//         let _current_thread = std::thread::current();
-//         READ_DATA_TOTAL_TIME
-//             .fetch_add(duration as u64, std::sync::atomic::Ordering::Relaxed);
+    /// Retrieves the next record batch in a blocking fashion.
+    ///
+    /// # Returns
+    ///
+    /// An Option containing a Result with the next RecordBatch, or None if there are no more batches
+    pub fn next_rb_blocked(&self) -> Option<std::result::Result<RecordBatch, Report>> {
+        // let current_time = std::time::Instant::now();
+        let inner_reader = self.reader();
+        let runtime = self.runtime();
+        let res = runtime.block_on(async move {
+            let mut reader = inner_reader.lock().await;
+            reader.next_rb().await
+        });
+        // let duration = (std::time::Instant::now() - current_time).as_millis();
+        // let _current_thread = std::thread::current();
+        // READ_DATA_TOTAL_TIME
+        //     .fetch_add(duration as u64, std::sync::atomic::Ordering::Relaxed);
 
-//         // if duration == 0{
-//         //     println!("thread name: {:?}======thread id: {:?}========cache get data cost {} ms", current_thread.name(), current_thread.id(), READ_DATA_TOTAL_TIME.load(std::sync::atomic::Ordering::Acquire));
-//         // }
-//         // info!("thread name: {:?}======thread id: {:?}========cache get data cost {} ms", current_thread.name(), current_thread.id(), stats.total_query_time());
+        // if duration == 0{
+        //     println!("thread name: {:?}======thread id: {:?}========cache get data cost {} ms", current_thread.name(), current_thread.id(), READ_DATA_TOTAL_TIME.load(std::sync::atomic::Ordering::Acquire));
+        // }
+        // info!("thread name: {:?}======thread id: {:?}========cache get data cost {} ms", current_thread.name(), current_thread.id(), stats.total_query_time());
 
-//         res
-//     }
+        res
+    }
 
-//     /// Gets the schema of the reader.
-//     ///
-//     /// # Returns
-//     ///
-//     /// An Option containing the SchemaRef, or None if the schema is not yet available
-//     pub fn get_schema(&self) -> Option<SchemaRef> {
-//         self.schema.clone()
-//     }
+    /// Gets the schema of the reader.
+    ///
+    /// # Returns
+    ///
+    /// An Option containing the SchemaRef, or None if the schema is not yet available
+    pub fn schema(&self) -> Option<SchemaRef> {
+        self.schema.clone()
+    }
 
-//     fn get_runtime(&self) -> Arc<Runtime> {
-//         self.runtime.clone()
-//     }
+    fn runtime(&self) -> Arc<Runtime> {
+        self.runtime.clone()
+    }
 
-//     fn get_inner_reader(&self) -> Arc<AtomicRefCell<Mutex<LakeSoulReader>>> {
-//         self.inner.clone()
-//     }
-// }
+    fn reader(&self) -> Arc<Mutex<LakeSoulReader>> {
+        self.inner.clone()
+    }
+}
 
-// impl RecordBatchReader for SyncSendableMutableLakeSoulReader {
-//     fn schema(&self) -> SchemaRef {
-//         self.get_schema().expect("reader has no schema")
-//     }
-// }
+impl Iterator for SyncSendableMutableLakeSoulReader {
+    type Item = Result<RecordBatch, ArrowError>;
 
-// impl Iterator for SyncSendableMutableLakeSoulReader {
-//     type Item = Result<RecordBatch, ArrowError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_rb_blocked()
+            .map(|res| res.map_err(|e| ArrowError::NotYetImplemented(format!("{}", e)))) // TODO wait for rootcause 0.11
+    }
+}
 
-//     fn next(&mut self) -> Option<Self::Item> {
-//         self.next_rb_blocked().map(|res| {
-//             res.map_err(|e| match e {
-//                 DataFusionError::ArrowError(arrow_error, _) => arrow_error,
-//                 other => ArrowError::ExternalError(format!("{other}").into()),
-//             })
-//         })
-//     }
-// }
+impl RecordBatchReader for SyncSendableMutableLakeSoulReader {
+    fn schema(&self) -> SchemaRef {
+        self.schema().expect("reader has no schema")
+    }
+}
 
 // #[cfg(test)]
 // mod tests {

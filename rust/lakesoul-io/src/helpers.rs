@@ -13,31 +13,22 @@ use arrow_buffer::i256;
 use arrow_schema::{
     ArrowError, DataType, Field, Schema, SchemaBuilder, SchemaRef, TimeUnit,
 };
+
 use chrono::{DateTime, Duration};
-use datafusion::physical_plan::memory::LazyBatchGenerator;
-use datafusion::{
-    datasource::{
-        file_format::FileFormat,
-        listing::{ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl},
-        physical_plan::FileScanConfig,
-    },
-    execution::context::{SessionContext, SessionState},
-    logical_expr::col,
-    physical_expr::{PhysicalSortExpr, create_physical_expr},
-    physical_plan::PhysicalExpr,
-    physical_planner::create_physical_sort_expr,
-};
-use datafusion_common::DataFusionError::{External, Internal};
-use datafusion_common::{
-    DFSchema, DataFusionError, Result, ScalarValue, cast::as_primitive_array,
-};
-use datafusion_substrait::substrait::proto::Plan;
+use datafusion_common::DataFusionError;
+use datafusion_common::{DFSchema, ScalarValue, cast::as_primitive_array};
+use datafusion_datasource::ListingTableUrl;
+use datafusion_datasource::file_scan_config::FileScanConfig;
+use datafusion_expr::{Expr, Operator};
+use datafusion_physical_expr::{PhysicalExpr, PhysicalSortExpr};
+use datafusion_physical_plan::memory::LazyBatchGenerator;
 use futures::{StreamExt, TryStreamExt};
 use object_store::ObjectMeta;
 use object_store::path::Path;
 use parquet::format::FileMetaData;
 use proto::proto::entity::JniWrapper;
 use rand::distr::SampleString;
+use rootcause::{Report, bail, report};
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::iter::zip;
@@ -45,16 +36,11 @@ use std::{collections::HashMap, fmt, sync::Arc};
 use tokio::runtime::Builder;
 use url::Url;
 
-use crate::{
-    constant::{
-        DATE32_FORMAT, FLINK_TIMESTAMP_FORMAT, LAKESOUL_COMMA, LAKESOUL_EMPTY_STRING,
-        LAKESOUL_EQ, LAKESOUL_NULL_STRING, TIMESTAMP_MICROSECOND_FORMAT,
-        TIMESTAMP_MILLSECOND_FORMAT, TIMESTAMP_NANOSECOND_FORMAT,
-        TIMESTAMP_SECOND_FORMAT,
-    },
-    filter::parser::Parser,
-    lakesoul_io_config::LakeSoulIOConfig,
-    transform::uniform_schema,
+use crate::constant::{
+    DATE32_FORMAT, DEFAULT_PARTITION_DESC, FLINK_TIMESTAMP_FORMAT, LAKESOUL_COMMA,
+    LAKESOUL_EMPTY_STRING, LAKESOUL_EQ, LAKESOUL_NULL_STRING,
+    TIMESTAMP_MICROSECOND_FORMAT, TIMESTAMP_MILLSECOND_FORMAT,
+    TIMESTAMP_NANOSECOND_FORMAT, TIMESTAMP_SECOND_FORMAT,
 };
 
 /// Converts column names to [`datafusion::physical_expr::PhysicalSortExpr`].
@@ -71,18 +57,19 @@ use crate::{
 pub fn column_names_to_physical_sort_expr(
     columns: &[String],
     input_dfschema: &DFSchema,
-    session_state: &SessionState,
-) -> Result<Vec<PhysicalSortExpr>> {
-    columns
-        .iter()
-        .map(|column| {
-            create_physical_sort_expr(
-                &col(column).sort(true, true),
-                input_dfschema,
-                session_state.execution_props(),
-            )
-        })
-        .collect::<Result<Vec<_>>>()
+    // session_state: &SessionState,
+) -> Result<Vec<PhysicalSortExpr>, Report> {
+    todo!()
+    // columns
+    //     .iter()
+    //     .map(|column| {
+    //         create_physical_sort_expr(
+    //             &col(column).sort(true, true),
+    //             input_dfschema,
+    //             session_state.execution_props(),
+    //         )
+    //     })
+    //     .collect::<Result<Vec<_>>>()
 }
 
 /// Converts column names to [`datafusion::physical_expr::PhysicalExpr`].
@@ -99,19 +86,19 @@ pub fn column_names_to_physical_sort_expr(
 pub fn column_names_to_physical_expr(
     columns: &[String],
     input_dfschema: &DFSchema,
-    session_state: &SessionState,
-) -> Result<Vec<Arc<dyn PhysicalExpr>>> {
-    let runtime_expr = columns
-        .iter()
-        .map(|column| {
-            create_physical_expr(
-                &col(column),
-                input_dfschema,
-                session_state.execution_props(),
-            )
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(runtime_expr)
+) -> Result<Vec<Arc<dyn PhysicalExpr>>, Report> {
+    todo!()
+    // let runtime_expr = columns
+    //     .iter()
+    //     .map(|column| {
+    //         create_physical_expr(
+    //             &col(column),
+    //             input_dfschema,
+    //             session_state.execution_props(),
+    //         )
+    //     })
+    //     .collect::<Result<Vec<_>>>()?;
+    // Ok(runtime_expr)
 }
 
 /// Converts range partitions to partition columns of (Column Name, [`arrow::datatypes::DataType`]).
@@ -127,7 +114,7 @@ pub fn column_names_to_physical_expr(
 pub fn range_partition_to_partition_cols(
     schema: SchemaRef,
     range_partitions: &[String],
-) -> Result<Vec<(String, DataType)>> {
+) -> Result<Vec<(String, DataType)>, Report> {
     range_partitions
         .iter()
         .map(|col| {
@@ -136,7 +123,7 @@ pub fn range_partition_to_partition_cols(
                 schema.field_with_name(col)?.data_type().clone(),
             ))
         })
-        .collect::<Result<Vec<_>>>()
+        .collect::<Result<Vec<_>, Report>>()
 }
 
 /// Gets the [`datafusion::scalar::ScalarValue`] of the partition columns from a record batch.
@@ -152,22 +139,23 @@ pub fn range_partition_to_partition_cols(
 pub fn get_columnar_values(
     batch: &RecordBatch,
     range_partitions: Arc<Vec<String>>,
-) -> Result<Vec<(String, ScalarValue)>> {
-    range_partitions
-        .iter()
-        .map(|range_col| {
-            if let Some(array) = batch.column_by_name(range_col) {
-                match ScalarValue::try_from_array(array, 0) {
-                    Ok(scalar) => Ok((range_col.clone(), scalar)),
-                    Err(e) => Err(e),
-                }
-            } else {
-                Err(External(
-                    format!("Invalid partition desc of {}", range_col).into(),
-                ))
-            }
-        })
-        .collect::<Result<Vec<_>>>()
+) -> Result<Vec<(String, ScalarValue)>, Report> {
+    todo!()
+    // range_partitions
+    //     .iter()
+    //     .map(|range_col| {
+    //         if let Some(array) = batch.column_by_name(range_col) {
+    //             match ScalarValue::try_from_array(array, 0) {
+    //                 Ok(scalar) => Ok((range_col.clone(), scalar)),
+    //                 Err(e) => Err(e),
+    //             }
+    //         } else {
+    //             Err(External(
+    //                 format!("Invalid partition desc of {}", range_col).into(),
+    //             ))
+    //         }
+    //     })
+    //     .collect::<Result<Vec<_>>>()
 }
 
 /// Formats a [`datafusion::scalar::ScalarValue`] to a string.
@@ -240,7 +228,7 @@ pub fn format_scalar_value(v: &ScalarValue) -> String {
         ScalarValue::Binary(e)
         | ScalarValue::FixedSizeBinary(_, e)
         | ScalarValue::LargeBinary(e) => match e {
-            Some(bytes) => hex::encode(bytes),
+            Some(bytes) => const_hex::encode(bytes),
             None => LAKESOUL_NULL_STRING.to_string(),
         },
         other => other.to_string(),
@@ -257,7 +245,7 @@ pub fn format_scalar_value(v: &ScalarValue) -> String {
 /// # Returns
 ///
 /// Returns a [`datafusion::scalar::ScalarValue`] of the given string
-pub fn into_scalar_value(val: &str, data_type: &DataType) -> Result<ScalarValue> {
+pub fn into_scalar_value(val: &str, data_type: &DataType) -> Result<ScalarValue, Report> {
     if val.eq(LAKESOUL_NULL_STRING) {
         match data_type {
             DataType::Date32 => Ok(ScalarValue::Date32(None)),
@@ -339,9 +327,7 @@ pub fn into_scalar_value(val: &str, data_type: &DataType) -> Result<ScalarValue>
                         match duration.num_microseconds() {
                             Some(microsecond) => microsecond,
                             None => {
-                                return Err(Internal(
-                                    "microsecond is out of range".to_string(),
-                                ));
+                                bail!("microsecond is out of range");
                             }
                         }
                     } else {
@@ -353,9 +339,7 @@ pub fn into_scalar_value(val: &str, data_type: &DataType) -> Result<ScalarValue>
                         {
                             Some(microsecond) => microsecond,
                             None => {
-                                return Err(Internal(
-                                    "microsecond is out of range".to_string(),
-                                ));
+                                bail!("microsecond is out of range");
                             }
                         }
                     };
@@ -373,9 +357,7 @@ pub fn into_scalar_value(val: &str, data_type: &DataType) -> Result<ScalarValue>
                         match duration.num_nanoseconds() {
                             Some(nanosecond) => nanosecond,
                             None => {
-                                return Err(Internal(
-                                    "nanosecond is out of range".to_string(),
-                                ));
+                                bail!("nanosecond is out of range")
                             }
                         }
                     } else {
@@ -387,9 +369,7 @@ pub fn into_scalar_value(val: &str, data_type: &DataType) -> Result<ScalarValue>
                         {
                             Some(nanosecond) => nanosecond,
                             None => {
-                                return Err(Internal(
-                                    "nanoseconds is out of range".to_string(),
-                                ));
+                                bail!("nanoseconds is out of range");
                             }
                         }
                     };
@@ -409,15 +389,17 @@ pub fn into_scalar_value(val: &str, data_type: &DataType) -> Result<ScalarValue>
                 *p,
                 *s,
             )),
-            DataType::Binary => Ok(ScalarValue::Binary(Some(hex::decode(val).unwrap()))),
+            DataType::Binary => {
+                Ok(ScalarValue::Binary(Some(const_hex::decode(val).unwrap())))
+            }
             DataType::FixedSizeBinary(size) => Ok(ScalarValue::FixedSizeBinary(
                 *size,
-                Some(hex::decode(val).unwrap()),
+                Some(const_hex::decode(val).unwrap()),
             )),
             DataType::LargeBinary => {
-                Ok(ScalarValue::LargeBinary(Some(hex::decode(val).unwrap())))
+                Ok(ScalarValue::LargeBinary(Some(const_hex::decode(val)?)))
             }
-            _ => ScalarValue::try_from_string(val.to_string(), data_type),
+            _ => Ok(ScalarValue::try_from_string(val.to_string(), data_type)?),
         }
     }
 }
@@ -459,7 +441,7 @@ pub fn columnar_values_to_partition_desc(
     columnar_values: &[(String, ScalarValue)],
 ) -> String {
     if columnar_values.is_empty() {
-        "-5".to_string()
+        DEFAULT_PARTITION_DESC.to_string()
     } else {
         columnar_values
             .iter()
@@ -482,8 +464,8 @@ pub fn columnar_values_to_partition_desc(
 pub fn partition_desc_to_scalar_values(
     schema: SchemaRef,
     partition_desc: String,
-) -> Result<Vec<ScalarValue>> {
-    if partition_desc == "-5" {
+) -> Result<Vec<ScalarValue>, Report> {
+    if partition_desc == DEFAULT_PARTITION_DESC {
         Ok(vec![])
     } else {
         let mut part_values = Vec::with_capacity(schema.fields().len());
@@ -493,9 +475,7 @@ pub fn partition_desc_to_scalar_values(
                     part_values.push((name, val));
                 }
                 _ => {
-                    return Err(External(
-                        format!("Invalid partition_desc: {}", partition_desc).into(),
-                    ));
+                    bail!("Invalid partition_desc: {}", partition_desc);
                 }
             }
         }
@@ -524,9 +504,9 @@ pub fn partition_desc_to_scalar_values(
 /// Returns a tuple of (Partition Description, Map of Column Names to File Paths)
 pub fn partition_desc_from_file_scan_config(
     conf: &FileScanConfig,
-) -> Result<(String, HashMap<String, String>)> {
+) -> Result<(String, HashMap<String, String>), Report> {
     if conf.table_partition_cols.is_empty() {
-        Ok(("-5".to_string(), HashMap::default()))
+        Ok((DEFAULT_PARTITION_DESC.to_string(), HashMap::default()))
     } else {
         match conf.file_groups.first().and_then(|g| g.files().first()) {
             Some(file) => Ok((
@@ -544,112 +524,110 @@ pub fn partition_desc_from_file_scan_config(
                     },
                 )),
             )),
-            None => Err(External(
-                format!("Invalid file_group {:?}", conf.file_groups).into(),
-            )),
+            None => Err(report!("Invalid file_group {:?}", conf.file_groups)),
         }
     }
 }
 
-/// Creates a [`datafusion::datasource::listing::ListingTable`] from a [`LakeSoulIOConfig`].
-///
-/// # Arguments
-///
-/// * `session_state` - The session state
-/// * `lakesoul_io_config` - The [`LakeSoulIOConfig`]
-/// * `file_format` - The file format
-/// * `as_sink` - Whether to create a sink
-///
-/// # Returns
-///
-/// Returns a tuple of (Option<[`arrow::datatypes::SchemaRef`]>, Arc<[`datafusion::datasource::listing::ListingTable`]>)
-pub async fn listing_table_from_lakesoul_io_config(
-    session_state: &SessionState,
-    lakesoul_io_config: LakeSoulIOConfig,
-    file_format: Arc<dyn FileFormat>,
-    as_sink: bool,
-) -> Result<(Option<SchemaRef>, Arc<ListingTable>)> {
-    let config = match as_sink {
-        false => {
-            // Parse the path
-            let table_paths = lakesoul_io_config
-                .files
-                .iter()
-                .map(ListingTableUrl::parse)
-                .collect::<Result<Vec<_>>>()?;
-            let object_metas = get_file_object_meta(session_state, &table_paths).await?;
-            let (table_paths, object_metas): (Vec<_>, Vec<_>) =
-                zip(table_paths, object_metas)
-                    .filter(|(_, obj_meta)| {
-                        let valid = obj_meta.size >= 8;
-                        if !valid {
-                            println!(
-                                "File {}, size {}, is invalid",
-                                obj_meta.location, obj_meta.size
-                            );
-                        }
-                        valid
-                    })
-                    .unzip();
-            // Resolve the schema
-            let resolved_schema = infer_schema(
-                session_state,
-                &table_paths,
-                &object_metas,
-                Arc::clone(&file_format),
-            )
-            .await?;
+// /// Creates a [`datafusion::datasource::listing::ListingTable`] from a [`LakeSoulIOConfig`].
+// //
+// /// # Arguments
+// ///
+// /// * `session_state` - The session state
+// /// * `lakesoul_io_config` - The [`LakeSoulIOConfig`]
+// /// * `file_format` - The file format
+// /// * `as_sink` - Whether to create a sink
+// ///
+// /// # Returns
+// ///
+// /// Returns a tuple of (Option<[`arrow::datatypes::SchemaRef`]>, Arc<[`datafusion::datasource::listing::ListingTable`]>)
+// pub async fn listing_table_from_lakesoul_io_config(
+//     session_state: &SessionState,
+//     lakesoul_io_config: LakeSoulIOConfig,
+//     file_format: Arc<dyn FileFormat>,
+//     as_sink: bool,
+// ) -> Result<(Option<SchemaRef>, Arc<ListingTable>)> {
+//     let config = match as_sink {
+//         false => {
+//             // Parse the path
+//             let table_paths = lakesoul_io_config
+//                 .files
+//                 .iter()
+//                 .map(ListingTableUrl::parse)
+//                 .collect::<Result<Vec<_>>>()?;
+//             let object_metas = get_file_object_meta(session_state, &table_paths).await?;
+//             let (table_paths, object_metas): (Vec<_>, Vec<_>) =
+//                 zip(table_paths, object_metas)
+//                     .filter(|(_, obj_meta)| {
+//                         let valid = obj_meta.size >= 8;
+//                         if !valid {
+//                             println!(
+//                                 "File {}, size {}, is invalid",
+//                                 obj_meta.location, obj_meta.size
+//                             );
+//                         }
+//                         valid
+//                     })
+//                     .unzip();
+//             // Resolve the schema
+//             let resolved_schema = infer_schema(
+//                 session_state,
+//                 &table_paths,
+//                 &object_metas,
+//                 Arc::clone(&file_format),
+//             )
+//             .await?;
 
-            let target_schema = if lakesoul_io_config.inferring_schema {
-                SchemaRef::new(Schema::empty())
-            } else {
-                uniform_schema(lakesoul_io_config.target_schema())
-            };
+//             let target_schema = if lakesoul_io_config.inferring_schema {
+//                 SchemaRef::new(Schema::empty())
+//             } else {
+//                 uniform_schema(lakesoul_io_config.target_schema())
+//             };
 
-            let table_partition_cols = range_partition_to_partition_cols(
-                target_schema.clone(),
-                lakesoul_io_config.range_partitions_slice(),
-            )?;
-            let listing_options = ListingOptions::new(file_format.clone())
-                .with_file_extension(".parquet")
-                .with_table_partition_cols(table_partition_cols);
+//             let table_partition_cols = range_partition_to_partition_cols(
+//                 target_schema.clone(),
+//                 lakesoul_io_config.range_partitions_slice(),
+//             )?;
+//             let listing_options = ListingOptions::new(file_format.clone())
+//                 .with_file_extension(".parquet")
+//                 .with_table_partition_cols(table_partition_cols);
 
-            let mut builder = SchemaBuilder::from(target_schema.fields());
-            // O(n^2), n = target_schema.fields().len()
-            for field in resolved_schema.fields() {
-                if target_schema.field_with_name(field.name()).is_err() {
-                    builder.push(field.clone());
-                }
-            }
+//             let mut builder = SchemaBuilder::from(target_schema.fields());
+//             // O(n^2), n = target_schema.fields().len()
+//             for field in resolved_schema.fields() {
+//                 if target_schema.field_with_name(field.name()).is_err() {
+//                     builder.push(field.clone());
+//                 }
+//             }
 
-            ListingTableConfig::new_with_multi_paths(table_paths)
-                .with_listing_options(listing_options)
-                // .with_schema(Arc::new(builder.finish()))
-                .with_schema(resolved_schema)
-        }
-        true => {
-            let target_schema = uniform_schema(lakesoul_io_config.target_schema());
-            let table_partition_cols = range_partition_to_partition_cols(
-                target_schema.clone(),
-                lakesoul_io_config.range_partitions_slice(),
-            )?;
+//             ListingTableConfig::new_with_multi_paths(table_paths)
+//                 .with_listing_options(listing_options)
+//                 // .with_schema(Arc::new(builder.finish()))
+//                 .with_schema(resolved_schema)
+//         }
+//         true => {
+//             let target_schema = uniform_schema(lakesoul_io_config.target_schema());
+//             let table_partition_cols = range_partition_to_partition_cols(
+//                 target_schema.clone(),
+//                 lakesoul_io_config.range_partitions_slice(),
+//             )?;
 
-            let listing_options = ListingOptions::new(file_format.clone())
-                .with_file_extension(".parquet")
-                .with_table_partition_cols(table_partition_cols);
-            let prefix = ListingTableUrl::parse(lakesoul_io_config.prefix.clone())?;
+//             let listing_options = ListingOptions::new(file_format.clone())
+//                 .with_file_extension(".parquet")
+//                 .with_table_partition_cols(table_partition_cols);
+//             let prefix = ListingTableUrl::parse(lakesoul_io_config.prefix.clone())?;
 
-            ListingTableConfig::new(prefix)
-                .with_listing_options(listing_options)
-                .with_schema(target_schema)
-        }
-    };
+//             ListingTableConfig::new(prefix)
+//                 .with_listing_options(listing_options)
+//                 .with_schema(target_schema)
+//         }
+//     };
 
-    Ok((
-        config.file_schema.clone(),
-        Arc::new(ListingTable::try_new(config)?),
-    ))
-}
+//     Ok((
+//         config.file_schema.clone(),
+//         Arc::new(ListingTable::try_new(config)?),
+//     ))
+// }
 
 /// Gets the [`object_store::ObjectMetadata`] for a list of table paths.
 ///
@@ -662,174 +640,174 @@ pub async fn listing_table_from_lakesoul_io_config(
 ///
 /// Returns a vector of [`object_store::ObjectMetadata`]
 pub async fn get_file_object_meta(
-    sc: &SessionState,
+    // sc: &SessionState,
     table_paths: &[ListingTableUrl],
-) -> Result<Vec<ObjectMeta>> {
-    let object_store_url = table_paths
-        .first()
-        .ok_or(Internal("no table path".to_string()))?
-        .object_store();
-    let store = sc.runtime_env().object_store(object_store_url.clone())?;
-    futures::stream::iter(table_paths)
-        .map(|path| {
-            let store = store.clone();
-            async move {
-                let path = Path::from_url_path(
-                    <ListingTableUrl as AsRef<Url>>::as_ref(path).path(),
-                )
-                .map_err(object_store::Error::from)?;
-                store.head(&path).await
-            }
-        })
-        .boxed()
-        .buffered(sc.config_options().execution.meta_fetch_concurrency)
-        .try_collect()
-        .await
-        .map_err(DataFusionError::from)
+) -> Result<Vec<ObjectMeta>, Report> {
+    todo!()
+    // let object_store_url = table_paths
+    //     .first()
+    //     .ok_or(Internal("no table path".to_string()))?
+    //     .object_store();
+    // let store = sc.runtime_env().object_store(object_store_url.clone())?;
+    // futures::stream::iter(table_paths)
+    //     .map(|path| {
+    //         let store = store.clone();
+    //         async move {
+    //             let path = Path::from_url_path(
+    //                 <ListingTableUrl as AsRef<Url>>::as_ref(path).path(),
+    //             )
+    //             .map_err(object_store::Error::from)?;
+    //             store.head(&path).await
+    //         }
+    //     })
+    //     .boxed()
+    //     .buffered(sc.config_options().execution.meta_fetch_concurrency)
+    //     .try_collect()
+    //     .await
+    //     .map_err(DataFusionError::from)
 }
 
-/// Infers the schema of files from a list of [`ListingTableUrl`] and [`ObjectMeta`].
-///
-/// # Arguments
-///
-/// * `sc` - The session state
-/// * `table_paths` - The list of table paths
-/// * `object_metas` - The list of object metadata
-/// * `file_format` - The file format
-///
-/// # Returns
-///
-/// Returns the inferred schema
-pub async fn infer_schema(
-    sc: &SessionState,
-    table_paths: &[ListingTableUrl],
-    object_metas: &[ObjectMeta],
-    file_format: Arc<dyn FileFormat>,
-) -> Result<SchemaRef> {
-    let object_store_url = table_paths
-        .first()
-        .ok_or(Internal("no table path".to_string()))?
-        .object_store();
-    let store = sc.runtime_env().object_store(object_store_url.clone())?;
+// /// Infers the schema of files from a list of [`ListingTableUrl`] and [`ObjectMeta`].
+// ///
+// /// # Arguments
+// ///
+// /// * `sc` - The session state
+// /// * `table_paths` - The list of table paths
+// /// * `object_metas` - The list of object metadata
+// /// * `file_format` - The file format
+// ///
+// /// # Returns
+// ///
+// /// Returns the inferred schema
+// pub async fn infer_schema(
+//     sc: &SessionState,
+//     table_paths: &[ListingTableUrl],
+//     object_metas: &[ObjectMeta],
+//     file_format: Arc<dyn FileFormat>,
+// ) -> Result<SchemaRef> {
+//     let object_store_url = table_paths
+//         .first()
+//         .ok_or(Internal("no table path".to_string()))?
+//         .object_store();
+//     let store = sc.runtime_env().object_store(object_store_url.clone())?;
 
-    // Resolve the schema
-    file_format.infer_schema(sc, &store, object_metas).await
-}
+//     // Resolve the schema
+//     file_format.infer_schema(sc, &store, object_metas).await
+// }
 
-/// Applies a partition filter to a [`JniWrapper`].
-///
-/// # Arguments
-///
-/// * `wrapper` - The [`JniWrapper`]
-/// * `schema` - The [`arrow::datatypes::SchemaRef`] of the table
-/// * `filter` - The [`datafusion_substrait::substrait::proto::Plan`]
-///
-/// # Returns
-///
-/// Returns the [`JniWrapper`] of filtered partition info
-pub fn apply_partition_filter(
-    wrapper: JniWrapper,
-    schema: SchemaRef,
-    filter: Plan,
-) -> Result<JniWrapper> {
-    let runtime = Builder::new_multi_thread()
-        .worker_threads(1)
-        .build()
-        .map_err(|e| External(Box::new(e)))?;
-    runtime.block_on(async {
-        let context = SessionContext::default();
-        let index_filed_name =
-            rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 8);
-        let index_filed = Field::new(index_filed_name, DataType::UInt32, false);
-        let schema_len = schema.fields().len();
-        let batch = batch_from_partition(&wrapper, schema, index_filed)?;
+// /// Applies a partition filter to a [`JniWrapper`].
+// ///
+// /// # Arguments
+// ///
+// /// * `wrapper` - The [`JniWrapper`]
+// /// * `schema` - The [`arrow::datatypes::SchemaRef`] of the table
+// /// * `filter` - The [`datafusion_substrait::substrait::proto::Plan`]
+// ///
+// /// # Returns
+// ///
+// /// Returns the [`JniWrapper`] of filtered partition info
+// pub fn apply_partition_filter(
+//     wrapper: JniWrapper,
+//     schema: SchemaRef,
+//     filter: Plan,
+// ) -> Result<JniWrapper> {
+//     let runtime = Builder::new_multi_thread()
+//         .worker_threads(1)
+//         .build()
+//         .map_err(|e| External(Box::new(e)))?;
+//     runtime.block_on(async {
+//         let context = SessionContext::default();
+//         let index_filed_name =
+//             rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 8);
+//         let index_filed = Field::new(index_filed_name, DataType::UInt32, false);
+//         let schema_len = schema.fields().len();
+//         let batch = batch_from_partition(&wrapper, schema, index_filed)?;
 
-        let dataframe = context.read_batch(batch)?;
-        let df_filter = Parser::parse_substrait_plan(filter, dataframe.schema())?;
+//         let dataframe = context.read_batch(batch)?;
+//         let df_filter = Parser::parse_substrait_plan(filter, dataframe.schema())?;
 
-        let results = dataframe.filter(df_filter)?.collect().await?;
+//         let results = dataframe.filter(df_filter)?.collect().await?;
 
-        let mut partition_info = vec![];
-        for result_batch in results {
-            for index in
-                as_primitive_array::<UInt32Type>(result_batch.column(schema_len))?
-                    .values()
-                    .iter()
-            {
-                partition_info.push(wrapper.partition_info[*index as usize].clone());
-            }
-        }
+//         let mut partition_info = vec![];
+//         for result_batch in results {
+//             for index in
+//                 as_primitive_array::<UInt32Type>(result_batch.column(schema_len))?
+//                     .values()
+//                     .iter()
+//             {
+//                 partition_info.push(wrapper.partition_info[*index as usize].clone());
+//             }
+//         }
 
-        Ok(JniWrapper {
-            partition_info,
-            ..Default::default()
-        })
-    })
-}
+//         Ok(JniWrapper {
+//             partition_info,
+//             ..Default::default()
+//         })
+//     })
+// }
 
-/// Creates a [`RecordBatch`] of partition info from a [`JniWrapper`].
-///
-/// # Arguments
-///
-/// * `wrapper` - The [`JniWrapper`]
-/// * `schema` - The [`arrow::datatypes::SchemaRef`] of the table
-/// * `index_field` - The [`arrow::datatypes::Field`] of the index field
-///
-/// # Returns
-///
-/// Returns a [`RecordBatch`] of partition info for partition filter
-fn batch_from_partition(
-    wrapper: &JniWrapper,
-    schema: SchemaRef,
-    index_field: Field,
-) -> Result<RecordBatch> {
-    let scalar_values = wrapper
-        .partition_info
-        .iter()
-        .map(|partition_info| {
-            partition_desc_to_scalar_values(
-                schema.clone(),
-                partition_info.partition_desc.clone(),
-            )
-        })
-        .collect::<Result<Vec<_>>>()?;
+// /// Creates a [`RecordBatch`] of partition info from a [`JniWrapper`].
+// ///
+// /// # Arguments
+// ///
+// /// * `wrapper` - The [`JniWrapper`]
+// /// * `schema` - The [`arrow::datatypes::SchemaRef`] of the table
+// /// * `index_field` - The [`arrow::datatypes::Field`] of the index field
+// ///
+// /// # Returns
+// ///
+// /// Returns a [`RecordBatch`] of partition info for partition filter
+// fn batch_from_partition(
+//     wrapper: &JniWrapper,
+//     schema: SchemaRef,
+//     index_field: Field,
+// ) -> Result<RecordBatch> {
+//     let scalar_values = wrapper
+//         .partition_info
+//         .iter()
+//         .map(|partition_info| {
+//             partition_desc_to_scalar_values(
+//                 schema.clone(),
+//                 partition_info.partition_desc.clone(),
+//             )
+//         })
+//         .collect::<Result<Vec<_>>>()?;
 
-    let mut columns = vec![vec![]; schema.fields().len()];
+//     let mut columns = vec![vec![]; schema.fields().len()];
 
-    for values in scalar_values.iter() {
-        values.iter().enumerate().for_each(|(index, value)| {
-            columns[index].push(value.clone());
-        })
-    }
-    let mut columns = columns
-        .iter()
-        .map(|values| ScalarValue::iter_to_array(values.clone()))
-        .collect::<Result<Vec<_>>>()?;
+//     for values in scalar_values.iter() {
+//         values.iter().enumerate().for_each(|(index, value)| {
+//             columns[index].push(value.clone());
+//         })
+//     }
+//     let mut columns = columns
+//         .iter()
+//         .map(|values| ScalarValue::iter_to_array(values.clone()))
+//         .collect::<Result<Vec<_>>>()?;
 
-    // Add index column
-    let mut fields_with_index = schema
-        .flattened_fields()
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>();
-    fields_with_index.push(index_field);
-    let schema_with_index = SchemaRef::new(Schema::new(fields_with_index));
-    columns.push(Arc::new(UInt32Array::from(
-        (0..wrapper.partition_info.len() as u32).collect::<Vec<_>>(),
-    )));
+//     // Add index column
+//     let mut fields_with_index = schema
+//         .flattened_fields()
+//         .into_iter()
+//         .cloned()
+//         .collect::<Vec<_>>();
+//     fields_with_index.push(index_field);
+//     let schema_with_index = SchemaRef::new(Schema::new(fields_with_index));
+//     columns.push(Arc::new(UInt32Array::from(
+//         (0..wrapper.partition_info.len() as u32).collect::<Vec<_>>(),
+//     )));
 
-    Ok(RecordBatch::try_new(schema_with_index, columns)?)
-}
+//     Ok(RecordBatch::try_new(schema_with_index, columns)?)
+// }
 
 /// Converts a date string to epoch days.
-pub fn date_str_to_epoch_days(value: &str) -> Result<i32> {
-    let date = chrono::NaiveDate::parse_from_str(value, DATE32_FORMAT)
-        .map_err(|e| External(Box::new(e)))?;
+pub fn date_str_to_epoch_days(value: &str) -> Result<i32, Report> {
+    let date = chrono::NaiveDate::parse_from_str(value, DATE32_FORMAT)?;
     let datetime = date
         .and_hms_opt(12, 12, 12)
-        .ok_or(Internal("invalid h/m/s".to_string()))?;
-    let epoch_time = DateTime::from_timestamp_millis(0).ok_or(Internal(
-        "the number of milliseconds is out of range for a NaiveDateTim".to_string(),
+        .ok_or(report!("invalid h/m/s"))?;
+    let epoch_time = DateTime::from_timestamp_millis(0).ok_or(report!(
+        "the number of milliseconds is out of range for a NaiveDateTime"
     ))?;
 
     Ok(datetime
@@ -838,11 +816,10 @@ pub fn date_str_to_epoch_days(value: &str) -> Result<i32> {
 }
 
 /// Converts a timestamp string to unix time.
-pub fn timestamp_str_to_unix_time(value: &str, fmt: &str) -> Result<Duration> {
-    let datetime = chrono::NaiveDateTime::parse_from_str(value, fmt)
-        .map_err(|e| External(Box::new(e)))?;
-    let epoch_time = DateTime::from_timestamp_millis(0).ok_or(Internal(
-        "the number of milliseconds is out of range for a NaiveDateTim".to_string(),
+pub fn timestamp_str_to_unix_time(value: &str, fmt: &str) -> Result<Duration, Report> {
+    let datetime = chrono::NaiveDateTime::parse_from_str(value, fmt)?;
+    let epoch_time = DateTime::from_timestamp_millis(0).ok_or(report!(
+        "the number of milliseconds is out of range for a NaiveDateTim"
     ))?;
 
     Ok(datetime.signed_duration_since(epoch_time.naive_utc()))
@@ -864,7 +841,7 @@ pub fn column_with_name_and_name2index<'a>(
 }
 
 /// Gets the memory size of a [`RecordBatch`].
-pub fn get_batch_memory_size(batch: &RecordBatch) -> Result<usize> {
+pub fn get_batch_memory_size(batch: &RecordBatch) -> Result<usize, Report> {
     Ok(batch
         .columns()
         .iter()
@@ -875,7 +852,7 @@ pub fn get_batch_memory_size(batch: &RecordBatch) -> Result<usize> {
 }
 
 /// Gets the file size of a [`FileMetaData`].
-pub fn get_file_size(metadata: &FileMetaData) -> usize {
+pub fn get_parquet_file_size(metadata: &FileMetaData) -> usize {
     let footer_size = metadata
         .footer_signing_key_metadata
         .as_ref()
@@ -889,7 +866,7 @@ pub fn get_file_size(metadata: &FileMetaData) -> usize {
 }
 
 /// Gets the file exist columns of a [`FileMetaData`].
-pub fn get_file_exist_col(metadata: &FileMetaData) -> String {
+pub fn get_parquet_exist_col(metadata: &FileMetaData) -> String {
     metadata
         .schema
         .iter()
@@ -928,6 +905,7 @@ pub fn extract_hash_bucket_id(file_path: &str) -> Option<u32> {
     // Regex pattern to extract the hash bucket id between the last underscore and any suffix
     // This pattern matches filenames starting with "part-" and containing an underscore
     // followed by digits before any optional suffix
+    // TODO need use static?
     let re = Regex::new(r"part-.*_(\d+)(?:\..+)?$").ok()?;
 
     if let Some(captures) = re.captures(file_name)
@@ -947,11 +925,9 @@ pub struct ColumnEquality {
 }
 
 /// Checks if an expression is an OR-conjunctive expression.
-pub fn is_or_conjunctive(expr: &datafusion::logical_expr::Expr) -> bool {
+pub fn is_or_conjunctive(expr: &Expr) -> bool {
     match expr {
-        datafusion::logical_expr::Expr::BinaryExpr(binary_expr) => {
-            binary_expr.op == datafusion::logical_expr::Operator::Or
-        }
+        Expr::BinaryExpr(binary_expr) => binary_expr.op == Operator::Or,
         _ => false,
     }
 }
@@ -961,7 +937,7 @@ pub fn is_or_conjunctive(expr: &datafusion::logical_expr::Expr) -> bool {
 /// This function looks for OR-conjunctive expressions where all components
 /// are equality comparisons on primary key columns.
 pub fn collect_or_conjunctive_filter_expressions(
-    filters: &[datafusion::logical_expr::Expr],
+    filters: &[Expr],
     primary_keys: &[String],
 ) -> Vec<ColumnEquality> {
     let mut result = Vec::new();
@@ -988,13 +964,8 @@ pub fn collect_or_conjunctive_filter_expressions(
 
 /// Collects column equality comparisons from an expression.
 ///
-/// Recursively traverses OR expressions to find all column = value comparisons.
-pub fn collect_column_equalities(
-    expr: &datafusion::logical_expr::Expr,
-    equalities: &mut Vec<ColumnEquality>,
-) {
-    use datafusion::logical_expr::{Expr, Operator};
-
+/// Recursively traverses OR expressions to find all `column = value` comparisons.
+pub fn collect_column_equalities(expr: &Expr, equalities: &mut Vec<ColumnEquality>) {
     match expr {
         // If it's an OR expression, process both sides
         Expr::BinaryExpr(binary_expr) if binary_expr.op == Operator::Or => {
@@ -1003,14 +974,14 @@ pub fn collect_column_equalities(
         }
         // If it's an equality comparison with a literal, extract the column name and scalar value
         Expr::BinaryExpr(binary_expr) if binary_expr.op == Operator::Eq => {
-            if let (Expr::Column(col), Expr::Literal(scalar)) =
+            if let (Expr::Column(col), Expr::Literal(scalar, _)) =
                 (&binary_expr.left.as_ref(), &binary_expr.right.as_ref())
             {
                 equalities.push(ColumnEquality {
                     column_name: col.name.clone(),
                     scalar_value: scalar.clone(),
                 });
-            } else if let (Expr::Literal(scalar), Expr::Column(col)) =
+            } else if let (Expr::Literal(scalar, _), Expr::Column(col)) =
                 (&binary_expr.left.as_ref(), &binary_expr.right.as_ref())
             {
                 equalities.push(ColumnEquality {
@@ -1076,10 +1047,10 @@ pub struct InMemGenerator {
 }
 
 impl InMemGenerator {
-    pub fn try_new(batches: Vec<RecordBatch>) -> Result<Self> {
-        Ok(Self {
+    pub fn new(batches: Vec<RecordBatch>) -> Self {
+        Self {
             batches: VecDeque::from(batches),
-        })
+        }
     }
 }
 
@@ -1090,7 +1061,7 @@ impl Display for InMemGenerator {
 }
 
 impl LazyBatchGenerator for InMemGenerator {
-    fn generate_next_batch(&mut self) -> Result<Option<RecordBatch>> {
+    fn generate_next_batch(&mut self) -> Result<Option<RecordBatch>, DataFusionError> {
         Ok(self.batches.pop_front())
     }
 }

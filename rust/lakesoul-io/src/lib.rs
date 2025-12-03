@@ -54,11 +54,13 @@
 #[macro_use]
 extern crate tracing;
 
+#[cfg(feature = "hdfs")]
+mod hdfs;
 // pub mod async_writer;
 // pub mod datasource;
 // pub mod filter;
-// pub mod hash_utils;
-// pub mod helpers;
+pub mod hash_utils;
+pub mod helpers;
 // pub mod lakesoul_cache;
 // pub mod lakesoul_io_config;
 // pub mod lakesoul_reader;
@@ -68,18 +70,17 @@ extern crate tracing;
 // pub mod repartition;
 // pub mod sorted_merge;
 
-#[cfg(feature = "hdfs")]
-mod hdfs;
+
 
 mod config;
 pub mod constant;
+mod data_sink;
 mod data_source;
 mod reader;
-mod session;
 mod writer;
 
 // mod default_column_stream;
-// mod transform;
+mod transform;
 
 // #[doc(inline)]
 // pub use arrow;
