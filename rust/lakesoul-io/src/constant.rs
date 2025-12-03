@@ -39,7 +39,7 @@ pub static ARROW_CAST_OPTIONS: LazyLock<CastOptions<'static>> =
     });
 
 #[derive(Debug, Default)]
-struct ConstNullArray {
+pub struct ConstNullArray {
     inner: HashMap<DataType, ArrayRef>,
 }
 
@@ -69,7 +69,7 @@ impl ConstNullArray {
 }
 
 #[derive(Debug, Default)]
-struct ConstEmptyArray {
+pub struct ConstEmptyArray {
     inner: HashMap<DataType, ArrayRef>,
 }
 

@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use crate::sorted_merge::cursor::CursorValues;
+use crate::physical_plan::sorted_merge::cursor::CursorValues;
 use arrow::{array::ArrayRef, datatypes::SchemaRef, record_batch::RecordBatch};
 use arrow_array::Array;
 use arrow_cast::pretty::pretty_format_batches;

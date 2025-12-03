@@ -27,7 +27,7 @@ use arrow::buffer::{Buffer, OffsetBuffer, ScalarBuffer};
 use arrow::compute::SortOptions;
 use arrow::datatypes::ArrowNativeTypeOp;
 use arrow::row::Rows;
-use datafusion::execution::memory_pool::MemoryReservation;
+use datafusion_execution::memory_pool::MemoryReservation;
 
 /// A comparable collection of values for use with [`Cursor`]
 ///
@@ -161,7 +161,7 @@ pub struct RowValues {
 
     /// Tracks for the memory used by in the `Rows` of this
     /// cursor. Freed on drop
-    _reservation: MemoryReservation,
+    reservation: MemoryReservation,
 }
 
 impl RowValues {
@@ -177,10 +177,7 @@ impl RowValues {
             "memory reservation mismatch"
         );
         assert!(rows.num_rows() > 0);
-        Self {
-            rows,
-            _reservation: reservation,
-        }
+        Self { rows, reservation }
     }
 }
 
@@ -353,7 +350,7 @@ pub struct ArrayValues<T: CursorValues> {
 
     /// Tracks the memory used by the values array,
     /// freed on drop.
-    _reservation: MemoryReservation,
+    reservation: MemoryReservation,
 }
 
 impl<T: CursorValues> ArrayValues<T> {
@@ -376,7 +373,7 @@ impl<T: CursorValues> ArrayValues<T> {
             values: array.values(),
             null_threshold,
             options,
-            _reservation: reservation,
+            reservation,
         }
     }
 

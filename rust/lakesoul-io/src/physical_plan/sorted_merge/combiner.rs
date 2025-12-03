@@ -13,13 +13,13 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use crate::constant::{ConstEmptyArray, ConstNullArray};
-use crate::sorted_merge::merge_operator::{MergeOperator, MergeResult};
-use crate::sorted_merge::sort_key_range::{
+use crate::physical_plan::sorted_merge::cursor::CursorValues;
+use crate::physical_plan::sorted_merge::merge_operator::{MergeOperator, MergeResult};
+use crate::physical_plan::sorted_merge::sort_key_range::{
     SortKeyArrayRange, SortKeyArrayRangeVec, SortKeyBatchRange, SortKeyBatchRanges,
+    UseLastSortKeyBatchRanges,
 };
 
-use super::sort_key_range::UseLastSortKeyBatchRanges;
-use crate::sorted_merge::cursor::CursorValues;
 use arrow::compute::interleave;
 use arrow::{
     array::{

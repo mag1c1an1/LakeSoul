@@ -11,112 +11,35 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use crate::sorted_merge::combiner::*;
-use crate::sorted_merge::merge_operator::MergeOperator;
-use crate::sorted_merge::sort_key_range::SortKeyBatchRange;
-
-use crate::default_column_stream::DefaultColumnStream;
-use crate::sorted_merge::cursor::{ArrayValues, CursorArray, CursorValues, RowValues};
-use crate::sorted_merge::stream::{FieldCursorStream, RowCursorStream};
 use arrow::array::*;
 use arrow::record_batch::RecordBatch;
 use arrow_array::{
     BinaryArray, LargeBinaryArray, LargeStringArray, StringArray, StringViewArray,
     downcast_primitive,
 };
-use arrow_schema::{DataType, SortOptions};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::error::Result;
-use datafusion::execution::memory_pool::MemoryReservation;
-use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
-use datafusion::physical_plan::{
-    RecordBatchStream, SendableRecordBatchStream, expressions::col,
-};
-use datafusion_common::DataFusionError::ArrowError;
+use arrow_schema::{DataType, SchemaRef, SortOptions};
+use datafusion_common::DataFusionError;
+use datafusion_execution::memory_pool::MemoryReservation;
+use datafusion_execution::{RecordBatchStream, SendableRecordBatchStream};
+use datafusion_physical_expr::expressions::col;
+use datafusion_physical_expr::{LexOrdering, PhysicalSortExpr};
 use futures::stream::{Fuse, FusedStream};
 use futures::{Stream, StreamExt};
+use rootcause::Report;
+use rootcause::prelude::IntoBoxedError;
 
-/// A wrapper of sorted stream.
-pub(crate) struct SortedStream {
-    stream: SendableRecordBatchStream,
-}
-
-impl Debug for SortedStream {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "InMemSortedStream")
-    }
-}
-
-impl SortedStream {
-    pub(crate) fn new(stream: SendableRecordBatchStream) -> Self {
-        Self { stream }
-    }
-}
-
-pub(crate) type CursorStream<C> =
-    Pin<Box<dyn Stream<Item = Result<(C, RecordBatch)>> + Send>>;
-
-/// A wrapper of sorted input streams to merge together.
-struct MergingStreams<C: CursorValues> {
-    /// The sorted input streams to merge together
-    streams: Vec<Fuse<CursorStream<C>>>,
-    /// number of streams
-    num_streams: usize,
-}
-
-impl<C: CursorValues> Debug for MergingStreams<C> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MergingStreams")
-            .field("num_streams", &self.num_streams)
-            .finish()
-    }
-}
-
-impl<C: CursorValues> MergingStreams<C> {
-    fn new(input_streams: Vec<Fuse<CursorStream<C>>>) -> Self {
-        Self {
-            num_streams: input_streams.len(),
-            streams: input_streams,
-        }
-    }
-
-    fn num_streams(&self) -> usize {
-        self.num_streams
-    }
-}
-
-/// Struct of sorted stream merger.
-#[derive(Debug)]
-pub(crate) struct SortedStreamMerger<C: CursorValues, R: RangeCombinerTrait<C>> {
-    /// The schema of the RecordBatches yielded by this stream
-    schema: SchemaRef,
-
-    /// The sorted input streams to merge together
-    // streams: MergingStreams,
-    streams: MergingStreams<C>,
-
-    /// Maintain a flag for each stream denoting if the current range
-    /// has finished and needs to poll from the stream
-    range_finished: Vec<bool>,
-
-    /// The [`RangeCombiner`] of sorted stream
-    range_combiner: R,
-
-    /// If the stream has encountered an error
-    aborted: bool,
-
-    /// The accumulated indexes for the next record batch
-    batch_idx_counter: usize,
-
-    /// The initialized flag for each stream
-    initialized: Vec<bool>,
-}
-
-macro_rules! primitive_merge_helper {
-    ($t:ty, $($v:ident),+) => {
-        merge_helper!(PrimitiveArray<$t>, $($v),+)
-    };
-}
+use crate::physical_plan::sorted_merge::combiner::RangeCombinerTrait;
+use crate::physical_plan::sorted_merge::combiner::UseLastRangeCombiner;
+use crate::physical_plan::sorted_merge::combiner::{
+    MinHeapSortKeyBatchRangeCombiner, RangeCombinerResult,
+};
+use crate::physical_plan::sorted_merge::cursor::ArrayValues;
+use crate::physical_plan::sorted_merge::cursor::{CursorArray, CursorValues, RowValues};
+use crate::physical_plan::sorted_merge::merge_operator::MergeOperator;
+use crate::physical_plan::sorted_merge::sort_key_range::SortKeyBatchRange;
+use crate::physical_plan::stream::default_column::DefaultColumnStream;
+use crate::physical_plan::stream::field_cursor::FieldCursorStream;
+use crate::physical_plan::stream::row_cursor::RowCursorStream;
 
 macro_rules! merge_helper {
     ($t:ty, $streams:ident, $col_name:ident, $merge_schema:ident, $target_schema:ident, $batch_size:ident, $default_column_value:ident, $reservation:ident, $merge_operator:ident, $fields_map:ident) => {{
@@ -135,7 +58,7 @@ macro_rules! merge_helper {
                     Box::pin(stream);
                 Ok(stream)
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>, Report>>()?;
         create_merger!(
             ArrayValues<<$t as CursorArray>::Values>,
             streams,
@@ -147,6 +70,12 @@ macro_rules! merge_helper {
             $default_column_value
         );
     }};
+}
+
+macro_rules! primitive_merge_helper {
+    ($t:ty, $($v:ident),+) => {
+        merge_helper!(PrimitiveArray<$t>, $($v),+)
+    };
 }
 
 macro_rules! create_merger {
@@ -220,6 +149,82 @@ macro_rules! create_merger {
     }};
 }
 
+/// A wrapper of sorted stream.
+pub(crate) struct SortedStream {
+    stream: SendableRecordBatchStream,
+}
+
+impl Debug for SortedStream {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "InMemSortedStream")
+    }
+}
+
+impl SortedStream {
+    pub(crate) fn new(stream: SendableRecordBatchStream) -> Self {
+        Self { stream }
+    }
+}
+
+pub(crate) type CursorStream<C> =
+    Pin<Box<dyn Stream<Item = Result<(C, RecordBatch), DataFusionError>> + Send>>;
+
+/// A wrapper of sorted input streams to merge together.
+struct MergingStreams<C: CursorValues> {
+    /// The sorted input streams to merge together
+    streams: Vec<Fuse<CursorStream<C>>>,
+    /// number of streams
+    num_streams: usize,
+}
+
+impl<C: CursorValues> Debug for MergingStreams<C> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MergingStreams")
+            .field("num_streams", &self.num_streams)
+            .finish()
+    }
+}
+
+impl<C: CursorValues> MergingStreams<C> {
+    fn new(input_streams: Vec<Fuse<CursorStream<C>>>) -> Self {
+        Self {
+            num_streams: input_streams.len(),
+            streams: input_streams,
+        }
+    }
+
+    fn num_streams(&self) -> usize {
+        self.num_streams
+    }
+}
+
+/// Struct of sorted stream merger.
+#[derive(Debug)]
+pub(crate) struct SortedStreamMerger<C: CursorValues, R: RangeCombinerTrait<C>> {
+    /// The schema of the RecordBatches yielded by this stream
+    schema: SchemaRef,
+
+    /// The sorted input streams to merge together
+    // streams: MergingStreams,
+    streams: MergingStreams<C>,
+
+    /// Maintain a flag for each stream denoting if the current range
+    /// has finished and needs to poll from the stream
+    range_finished: Vec<bool>,
+
+    /// The [`RangeCombiner`] of sorted stream
+    range_combiner: R,
+
+    /// If the stream has encountered an error
+    aborted: bool,
+
+    /// The accumulated indexes for the next record batch
+    batch_idx_counter: usize,
+
+    /// The initialized flag for each stream
+    initialized: Vec<bool>,
+}
+
 pub(crate) fn build_sorted_stream_merger(
     streams: Vec<SortedStream>,
     primary_keys: Arc<Vec<String>>,
@@ -229,7 +234,7 @@ pub(crate) fn build_sorted_stream_merger(
     default_column_value: Arc<HashMap<String, String>>,
     merge_operator: Vec<MergeOperator>,
     reservation: MemoryReservation,
-) -> Result<SendableRecordBatchStream> {
+) -> Result<SendableRecordBatchStream, Report> {
     let fields_map = streams
         .iter()
         .map(|s| {
@@ -238,13 +243,14 @@ pub(crate) fn build_sorted_stream_merger(
                 .fields()
                 .iter()
                 .map(|f| Ok(merge_schema.index_of(f.name())?))
-                .collect::<Result<Vec<usize>>>()
+                .collect::<Result<Vec<usize>, Report>>()
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
     let fields_map = Arc::new(fields_map);
 
     // for single column pk with primitive data type,
     // use FieldCursorStream to avoid RowConverter overhead
+
     if primary_keys.len() == 1 {
         let col_name = primary_keys[0].as_str();
         let data_type = merge_schema.field_with_name(col_name)?.data_type();
@@ -272,7 +278,7 @@ pub(crate) fn build_sorted_stream_merger(
                     let col_expr = col(k.as_str(), &schema)?;
                     Ok(PhysicalSortExpr::new(col_expr, SortOptions::default()))
                 })
-                .collect::<Result<Vec<_>>>()?;
+                .collect::<Result<Vec<_>, Report>>()?;
             let stream = RowCursorStream::try_new(
                 schema.as_ref(),
                 &LexOrdering::new(sort_exprs),
@@ -282,7 +288,7 @@ pub(crate) fn build_sorted_stream_merger(
             let stream: CursorStream<RowValues> = Box::pin(stream);
             Ok(stream)
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>, Report>>()?;
     create_merger!(
         RowValues,
         streams,
@@ -309,7 +315,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
         streams: Vec<CursorStream<C>>,
         target_schema: SchemaRef,
         range_combiner: R,
-    ) -> Result<Self> {
+    ) -> Result<Self, Report> {
         let streams_num = streams.len();
 
         Ok(Self {
@@ -331,7 +337,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
         &mut self,
         cx: &mut Context<'_>,
         idx: usize,
-    ) -> Poll<Result<()>> {
+    ) -> Poll<Result<(), Report>> {
         if !self.range_finished[idx] {
             // Range is not finished - don't need a new RecordBatch yet
             return Poll::Ready(Ok(()));
@@ -347,7 +353,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
             match futures::ready!(stream.poll_next_unpin(cx)) {
                 None => return Poll::Ready(Ok(())),
                 Some(Err(e)) => {
-                    return Poll::Ready(Err(e));
+                    return Poll::Ready(Err(e.into()));
                 }
                 Some(Ok(batch)) => {
                     let (cursor_values, batch) = batch;
@@ -386,7 +392,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
     fn poll_next_inner(
         self: &mut Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<RecordBatch>>> {
+    ) -> Poll<Option<Result<RecordBatch, Report>>> {
         if self.aborted {
             return Poll::Ready(None);
         }
@@ -417,7 +423,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
         loop {
             match self.range_combiner.poll_result() {
                 RangeCombinerResult::Err(e) => {
-                    return Poll::Ready(Some(Err(ArrowError(e, None))));
+                    return Poll::Ready(Some(Err(e.into())));
                 }
                 RangeCombinerResult::None => {
                     return Poll::Ready(None);
@@ -444,7 +450,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
                     // continue to produce range
                 }
                 RangeCombinerResult::RecordBatch(batch) => {
-                    return Poll::Ready(Some(batch.map_err(|e| ArrowError(e, None))));
+                    return Poll::Ready(Some(batch.map_err(|e| e.into())));
                 }
             }
         }
@@ -452,13 +458,14 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
 }
 
 impl<C: CursorValues, R: RangeCombinerTrait<C>> Stream for SortedStreamMerger<C, R> {
-    type Item = Result<RecordBatch>;
+    type Item = Result<RecordBatch, DataFusionError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         self.poll_next_inner(cx)
+            .map_err(|e| DataFusionError::External(e.into_boxed_error()))
     }
 }
 
@@ -472,30 +479,29 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> RecordBatchStream
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::sync::Arc;
-
     use arrow::array::ArrayRef;
     use arrow::array::{Int32Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
     use arrow::util::pretty::print_batches;
     use arrow_array::Float64Array;
-    use datafusion::assert_batches_eq;
-    use datafusion::error::Result;
-    use datafusion::execution::context::TaskContext;
-    use datafusion::physical_plan::{ExecutionPlan, common};
-    use datafusion::prelude::{SessionConfig, SessionContext};
+    use datafusion_common::assert_batches_eq;
+    use datafusion_execution::TaskContext;
+    use datafusion_execution::config::SessionConfig;
+    use datafusion_execution::memory_pool::{GreedyMemoryPool, MemoryConsumer};
+    use datafusion_execution::runtime_env::RuntimeEnv;
+    use datafusion_physical_plan::memory::LazyMemoryExec;
+    use datafusion_physical_plan::{ExecutionPlan, common};
+    use rootcause::Report;
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
     use crate::helpers::InMemGenerator;
-    use crate::lakesoul_io_config::LakeSoulIOConfigBuilder;
-    use crate::lakesoul_reader::LakeSoulReader;
-    use crate::sorted_merge::merge_operator::MergeOperator;
-    use crate::sorted_merge::sorted_stream_merger::{
+    use crate::physical_plan::sorted_merge::merge_operator::MergeOperator;
+    use crate::physical_plan::sorted_merge::sorted_stream_merger::{
         SortedStream, build_sorted_stream_merger,
     };
-    use datafusion::execution::memory_pool::{GreedyMemoryPool, MemoryConsumer};
-    use datafusion::physical_plan::memory::LazyMemoryExec;
+
     use parking_lot::lock_api::RwLock;
 
     fn create_batch_one_col_i32(name: &str, vec: &[i32]) -> RecordBatch {
@@ -506,11 +512,11 @@ mod tests {
     async fn create_stream(
         batches: Vec<RecordBatch>,
         context: Arc<TaskContext>,
-    ) -> Result<SortedStream> {
+    ) -> Result<SortedStream, Report> {
         let schema = batches[0].schema();
         let exec = LazyMemoryExec::try_new(
             schema.clone(),
-            vec![Arc::new(RwLock::new(InMemGenerator::try_new(batches)?))],
+            vec![Arc::new(RwLock::new(InMemGenerator::new(batches)))],
         )?;
         let stream = exec.execute(0, context.clone())?;
         Ok(SortedStream::new(stream))
@@ -518,8 +524,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sorted_stream_merger() {
-        let session_ctx = SessionContext::new();
-        let task_ctx = session_ctx.task_ctx();
+        let task_ctx = Arc::new(TaskContext::default());
         let s1b1 = create_batch_one_col_i32("a", &[1, 1, 3, 3, 4]);
         let schema = s1b1.schema();
 
@@ -603,8 +608,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sorted_stream_merger_multi_columns() {
-        let session_ctx = SessionContext::new();
-        let task_ctx = session_ctx.task_ctx();
+        let task_ctx = Arc::new(TaskContext::default());
         let s1b1 = create_batch_i32(
             vec!["id", "a"],
             vec![&[1, 1, 3, 3, 4], &[10001, 10002, 10003, 10004, 10005]],
@@ -765,9 +769,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_sorted_stream_merger_with_sum_and_last() {
-        let session_config = SessionConfig::default().with_batch_size(2);
-        let session_ctx = SessionContext::new_with_config(session_config);
-        let task_ctx = session_ctx.task_ctx();
+        let sess_conf = SessionConfig::default().with_batch_size(2);
+        let runtime = Arc::new(RuntimeEnv::default());
+        let task_ctx = Arc::new(TaskContext::new(
+            None,
+            "TEST".to_string(),
+            sess_conf,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            runtime,
+        ));
+
         let s1b1 = create_batch(
             vec!["id", "a", "b", "c"],
             &[1, 1, 3, 3, 4],
@@ -803,7 +816,7 @@ mod tests {
                 "| id | a  | b    | c      |",
                 "+----+----+------+--------+",
                 "| 1  | 1  | 1.2  | 1001   |",
-                "| 1  | 9  | 2    | 102    |",
+                "| 1  | 9  | 2.0  | 102    |",
                 "| 3  | 3  |      | 10003  |",
                 "| 3  | 4  | 4.8  | 10004  |",
                 "| 4  | 9  | 4.8  | 15     |",
@@ -1004,7 +1017,7 @@ mod tests {
                 "+----+-----+------+-------+--------+",
                 "| id | a   | b    | c     | d      |",
                 "+----+-----+------+-------+--------+",
-                "| 1  | 10  | 2    | 102   |        |",
+                "| 1  | 10  | 2.0  | 102   |        |",
                 "| 3  | 30  | 4.8  | 201   |        |",
                 "| 4  | 40  | 1.2  | 20003 |        |",
                 "| 5  | 50  | 3.2  | 20006 | 33     |",
@@ -1018,74 +1031,74 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_s3_file_merge() {
-        let schema = Schema::new(vec![
-            Field::new("uuid", DataType::Utf8, false),
-            Field::new("ip", DataType::Utf8, true),
-            Field::new("hostname", DataType::Utf8, true),
-            Field::new("requests", DataType::Int64, true),
-            Field::new("name", DataType::Utf8, true),
-            Field::new("city", DataType::Utf8, true),
-            Field::new("job", DataType::Utf8, true),
-            Field::new("phonenum", DataType::Utf8, true),
-        ]);
-        let conf = LakeSoulIOConfigBuilder::new()
-            .with_primary_keys(vec!["uuid".to_string()])
-            .with_files(vec![
-                "/opt/spark/work-dir/result/table_bak_zstd/part--0001-6cb26ff7-d7b5-4997-a5df-d6450b6f4eae_00000.c000.parquet".to_string(),
-                "/opt/spark/work-dir/result/table_bak_zstd/part--0001-180d1486-f26e-4bf3-9816-5fae2f302f7b_00000.c000.parquet".to_string(),
-                "/opt/spark/work-dir/result/table_bak_zstd/part--0001-6e5c2082-d0ff-4995-9eae-4ebae5587d2e_00000.c000.parquet".to_string(),
-                "/opt/spark/work-dir/result/table_bak_zstd/part--0001-400e7944-1250-44ce-8781-8e7b39ec4ac9_00000.c000.parquet".to_string(),
-                "/opt/spark/work-dir/result/table_bak_zstd/part--0001-c8968e46-2331-40dd-8279-923197ffd4a0_00000.c000.parquet".to_string(),
-                "/opt/spark/work-dir/result/table_bak_zstd/part--0001-c06dff75-a09a-4c9b-b1ad-10fa522c9e40_00000.c000.parquet".to_string(),
-                "/opt/spark/work-dir/result/table_bak_zstd/part--0001-9af5eaed-95ac-4276-bbe2-0db2ce1f9b88_00000.c000.parquet".to_string(),
-                "/opt/spark/work-dir/result/table_bak_zstd/part--0001-4f2def3c-4cab-4fc5-b12c-e4e8aef6c723_00000.c000.parquet".to_string(),
-                "/opt/spark/work-dir/result/table_bak_zstd/part--0001-e149a62e-cef3-42ef-a6b4-9253985e2584_00000.c000.parquet".to_string(),
-                "/opt/spark/work-dir/result/table_bak_zstd/part--0001-4cd85802-f60e-450a-8e52-04e627f933fc_00000.c000.parquet".to_string(),
-                "/opt/spark/work-dir/result/table_bak_zstd/part--0001-1596e006-cd78-4d68-8c4c-88d0fff02e7b_00000.c000.parquet".to_string(),
-            ])
-            .with_schema(Arc::new(schema))
-            .with_thread_num(2)
-            .with_batch_size(8192)
-            .with_max_row_group_size(250000)
-            .with_object_store_option("fs.s3a.access.key".to_string(), "minioadmin1".to_string())
-            .with_object_store_option("fs.s3a.secret.key".to_string(), "minioadmin1".to_string())
-            .with_object_store_option("fs.s3a.endpoint".to_string(), "http://localhost:9000".to_string())
-            .build();
-        let mut reader = LakeSoulReader::new(conf).unwrap();
-        reader.start().await.unwrap();
-        let mut len = 0;
-        while let Some(rb) = reader.next_rb().await {
-            let rb = rb.unwrap();
-            len += rb.num_rows();
-        }
-        println!("total rows: {}", len);
-    }
+    //     #[tokio::test]
+    //     async fn test_s3_file_merge() {
+    //         let schema = Schema::new(vec![
+    //             Field::new("uuid", DataType::Utf8, false),
+    //             Field::new("ip", DataType::Utf8, true),
+    //             Field::new("hostname", DataType::Utf8, true),
+    //             Field::new("requests", DataType::Int64, true),
+    //             Field::new("name", DataType::Utf8, true),
+    //             Field::new("city", DataType::Utf8, true),
+    //             Field::new("job", DataType::Utf8, true),
+    //             Field::new("phonenum", DataType::Utf8, true),
+    //         ]);
+    //         let conf = LakeSoulIOConfigBuilder::new()
+    //             .with_primary_keys(vec!["uuid".to_string()])
+    //             .with_files(vec![
+    //                 "/opt/spark/work-dir/result/table_bak_zstd/part--0001-6cb26ff7-d7b5-4997-a5df-d6450b6f4eae_00000.c000.parquet".to_string(),
+    //                 "/opt/spark/work-dir/result/table_bak_zstd/part--0001-180d1486-f26e-4bf3-9816-5fae2f302f7b_00000.c000.parquet".to_string(),
+    //                 "/opt/spark/work-dir/result/table_bak_zstd/part--0001-6e5c2082-d0ff-4995-9eae-4ebae5587d2e_00000.c000.parquet".to_string(),
+    //                 "/opt/spark/work-dir/result/table_bak_zstd/part--0001-400e7944-1250-44ce-8781-8e7b39ec4ac9_00000.c000.parquet".to_string(),
+    //                 "/opt/spark/work-dir/result/table_bak_zstd/part--0001-c8968e46-2331-40dd-8279-923197ffd4a0_00000.c000.parquet".to_string(),
+    //                 "/opt/spark/work-dir/result/table_bak_zstd/part--0001-c06dff75-a09a-4c9b-b1ad-10fa522c9e40_00000.c000.parquet".to_string(),
+    //                 "/opt/spark/work-dir/result/table_bak_zstd/part--0001-9af5eaed-95ac-4276-bbe2-0db2ce1f9b88_00000.c000.parquet".to_string(),
+    //                 "/opt/spark/work-dir/result/table_bak_zstd/part--0001-4f2def3c-4cab-4fc5-b12c-e4e8aef6c723_00000.c000.parquet".to_string(),
+    //                 "/opt/spark/work-dir/result/table_bak_zstd/part--0001-e149a62e-cef3-42ef-a6b4-9253985e2584_00000.c000.parquet".to_string(),
+    //                 "/opt/spark/work-dir/result/table_bak_zstd/part--0001-4cd85802-f60e-450a-8e52-04e627f933fc_00000.c000.parquet".to_string(),
+    //                 "/opt/spark/work-dir/result/table_bak_zstd/part--0001-1596e006-cd78-4d68-8c4c-88d0fff02e7b_00000.c000.parquet".to_string(),
+    //             ])
+    //             .with_schema(Arc::new(schema))
+    //             .with_thread_num(2)
+    //             .with_batch_size(8192)
+    //             .with_max_row_group_size(250000)
+    //             .with_object_store_option("fs.s3a.access.key".to_string(), "minioadmin1".to_string())
+    //             .with_object_store_option("fs.s3a.secret.key".to_string(), "minioadmin1".to_string())
+    //             .with_object_store_option("fs.s3a.endpoint".to_string(), "http://localhost:9000".to_string())
+    //             .build();
+    //         let mut reader = LakeSoulReader::new(conf).unwrap();
+    //         reader.start().await.unwrap();
+    //         let mut len = 0;
+    //         while let Some(rb) = reader.next_rb().await {
+    //             let rb = rb.unwrap();
+    //             len += rb.num_rows();
+    //         }
+    //         println!("total rows: {}", len);
+    //     }
 
-    #[tokio::test]
-    async fn parquet_viewer() {
-        let session_config = SessionConfig::default().with_batch_size(2);
-        let session_ctx = SessionContext::new_with_config(session_config);
-        let stream = session_ctx
-            .read_parquet(
-                "part-00000-58928ac0-5640-486e-bb94-8990262a1797_00000.c000.parquet",
-                Default::default(),
-            )
-            .await
-            .unwrap()
-            .execute_stream()
-            .await
-            .unwrap();
-        let rb = common::collect(stream).await.unwrap();
-        println!(
-            "{}",
-            &rb.iter()
-                .map(RecordBatch::num_rows)
-                .collect::<Vec<usize>>()
-                .iter()
-                .sum::<usize>()
-        );
-        print_batches(&rb.clone()).expect("");
-    }
+    //     #[tokio::test]
+    //     async fn parquet_viewer() {
+    //         let session_config = SessionConfig::default().with_batch_size(2);
+    //         let session_ctx = SessionContext::new_with_config(session_config);
+    //         let stream = session_ctx
+    //             .read_parquet(
+    //                 "part-00000-58928ac0-5640-486e-bb94-8990262a1797_00000.c000.parquet",
+    //                 Default::default(),
+    //             )
+    //             .await
+    //             .unwrap()
+    //             .execute_stream()
+    //             .await
+    //             .unwrap();
+    //         let rb = common::collect(stream).await.unwrap();
+    //         println!(
+    //             "{}",
+    //             &rb.iter()
+    //                 .map(RecordBatch::num_rows)
+    //                 .collect::<Vec<usize>>()
+    //                 .iter()
+    //                 .sum::<usize>()
+    //         );
+    //         print_batches(&rb.clone()).expect("");
+    //     }
 }

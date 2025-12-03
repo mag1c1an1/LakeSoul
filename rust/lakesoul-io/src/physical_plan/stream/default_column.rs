@@ -4,9 +4,10 @@
 
 //! Module for the default column stream, which is used for the case of completing values for partition columns.
 
-pub mod empty_schema_stream;
-
+use datafusion_common::DataFusionError;
+use datafusion_execution::{RecordBatchStream, SendableRecordBatchStream};
 use futures::{Stream, StreamExt};
+use rootcause::prelude::IntoBoxedError;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
@@ -15,9 +16,6 @@ use std::task::{Context, Poll};
 
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
-
-use datafusion::error::Result;
-use datafusion::physical_plan::{RecordBatchStream, SendableRecordBatchStream};
 
 use crate::transform::{transform_record_batch, transform_schema};
 
@@ -87,7 +85,7 @@ impl DefaultColumnStream {
 }
 
 impl Stream for DefaultColumnStream {
-    type Item = Result<RecordBatch>;
+    type Item = Result<RecordBatch, DataFusionError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -111,7 +109,8 @@ impl Stream for DefaultColumnStream {
                         batch,
                         self.use_default,
                         self.default_column_value.clone(),
-                    );
+                    )
+                    .map_err(|e| DataFusionError::External(e.into_boxed_error()));
                     Poll::Ready(Some(batch))
                 }
             };

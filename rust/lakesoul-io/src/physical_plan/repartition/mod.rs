@@ -7,48 +7,46 @@
 use std::{
     any::Any,
     collections::HashMap,
+    error::Error,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 
 use arrow_schema::SchemaRef;
-use datafusion::{
-    common::runtime::SpawnedTask,
-    common::utils::transpose,
-    execution::{
-        TaskContext,
-        memory_pool::{MemoryConsumer, MemoryReservation},
-    },
-    physical_expr::EquivalenceProperties,
-    physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties,
-        Partitioning, PhysicalExpr, PlanProperties, RecordBatchStream,
-        SendableRecordBatchStream,
-        metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricBuilder},
-        sorts::streaming_merge::StreamingMergeBuilder,
-        stream::RecordBatchStreamAdapter,
-    },
-};
-use datafusion::{physical_expr::physical_exprs_equal, physical_plan::metrics};
-use datafusion_common::{DataFusionError, Result, Statistics};
+use datafusion_common::{DataFusionError, Statistics, utils::transpose};
 
 use arrow_array::{ArrayRef, RecordBatch, builder::UInt64Builder};
-use datafusion::physical_expr::LexOrdering;
-use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
+use datafusion_common_runtime::SpawnedTask;
+use datafusion_execution::{
+    RecordBatchStream, SendableRecordBatchStream, TaskContext,
+    memory_pool::{MemoryConsumer, MemoryReservation},
+};
+use datafusion_physical_expr::{
+    EquivalenceProperties, LexOrdering, Partitioning, PhysicalExpr, physical_exprs_equal,
+};
+use datafusion_physical_plan::{
+    DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, PlanProperties,
+    execution_plan::{Boundedness, EmissionType},
+    metrics::{self, BaselineMetrics, ExecutionPlanMetricsSet, MetricBuilder},
+    sorts::streaming_merge::StreamingMergeBuilder,
+    stream::RecordBatchStreamAdapter,
+};
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 
-use crate::{hash_utils::create_hashes, repartition::distributor_channels::channels};
-
-use self::distributor_channels::{
-    DistributionReceiver, DistributionSender, partition_aware_channels,
-};
-
 use parking_lot::Mutex;
+use rootcause::{Report, bail, prelude::IntoBoxedError};
+
+use crate::{
+    hash_utils::create_hashes,
+    physical_plan::repartition::distributor_channels::{
+        DistributionReceiver, DistributionSender, channels, partition_aware_channels,
+    },
+};
 
 mod distributor_channels;
 
-type MaybeBatch = Option<Result<RecordBatch>>;
+type MaybeBatch = Option<Result<RecordBatch, DataFusionError>>;
 type InputPartitionsToCurrentPartitionSender = Vec<DistributionSender<MaybeBatch>>;
 type InputPartitionsToCurrentPartitionReceiver = Vec<DistributionReceiver<MaybeBatch>>;
 
@@ -94,7 +92,7 @@ impl RepartitionByRangeAndHashExecState {
         metrics: ExecutionPlanMetricsSet,
         preserve_order: bool,
         name: String,
-        context: Arc<TaskContext>,
+        task_ctx: Arc<TaskContext>,
     ) -> Self {
         let num_input_partitions = input.output_partitioning().partition_count();
         let num_output_partitions = hash_partitioning.partition_count();
@@ -124,7 +122,7 @@ impl RepartitionByRangeAndHashExecState {
         for (partition, (tx, rx)) in txs.into_iter().zip(rxs).enumerate() {
             let reservation = Arc::new(Mutex::new(
                 MemoryConsumer::new(format!("{}[{partition}]", name))
-                    .register(context.memory_pool()),
+                    .register(task_ctx.memory_pool()),
             ));
             channels.insert(partition, (tx, rx, reservation));
         }
@@ -148,7 +146,7 @@ impl RepartitionByRangeAndHashExecState {
                     range_partitioning_expr.clone(),
                     hash_partitioning.clone(),
                     r_metrics,
-                    context.clone(),
+                    task_ctx.clone(),
                 ));
 
             // In a separate task, wait for each input to be done
@@ -170,12 +168,6 @@ impl RepartitionByRangeAndHashExecState {
     }
 }
 
-/// A utility that can be used to partition batches based on [`Partitioning`]
-pub struct BatchPartitioner {
-    state: BatchPartitionerState,
-    timer: metrics::Time,
-}
-
 /// The state of the [`BatchPartitioner`].
 struct BatchPartitionerState {
     /// The range partitioning expressions.
@@ -188,15 +180,20 @@ struct BatchPartitionerState {
     hash_buffer: Vec<u32>,
 }
 
+/// A utility that can be used to partition batches based on [`Partitioning`]
+pub struct BatchPartitioner {
+    state: BatchPartitionerState,
+    timer: metrics::Time,
+}
+
 impl BatchPartitioner {
     /// Create a new [`BatchPartitioner`] with the provided [`Partitioning`]
-    ///
     /// The time spent repartitioning will be recorded to `timer`
     pub fn try_new(
         range_partitioning_expr: Vec<Arc<dyn PhysicalExpr>>,
         hash_partitioning: Partitioning,
         timer: metrics::Time,
-    ) -> Result<Self> {
+    ) -> Result<Self, Report> {
         let state = match hash_partitioning {
             Partitioning::Hash(exprs, num_partitions) => BatchPartitionerState {
                 range_exprs: range_partitioning_expr,
@@ -205,9 +202,7 @@ impl BatchPartitioner {
                 hash_buffer: vec![],
             },
             other => {
-                return Err(DataFusionError::NotImplemented(format!(
-                    "Unsupported repartitioning scheme {other:?}"
-                )));
+                bail!("unsupported repartition schema{}", other);
             }
         };
 
@@ -221,11 +216,11 @@ impl BatchPartitioner {
     /// partition index. Any error returned by `f` will be immediately returned by this
     /// function without attempting to publish further [`RecordBatch`]
     ///
-    /// The time spent repartitioning, not including time spent in `f` will be recorded
+    /// The time spent repartitioning, not including time spent in `f`, will be recorded
     /// to the [`metrics::Time`] provided on construction
-    pub fn partition<F>(&mut self, batch: RecordBatch, mut f: F) -> Result<()>
+    pub fn partition<F>(&mut self, batch: RecordBatch, mut f: F) -> Result<(), Report>
     where
-        F: FnMut(usize, RecordBatch) -> Result<()>,
+        F: FnMut(usize, RecordBatch) -> Result<(), Report>,
     {
         self.partition_iter(batch)?.try_for_each(|res| match res {
             Ok((partition, batch)) => f(partition, batch),
@@ -235,33 +230,35 @@ impl BatchPartitioner {
 
     /// Actual implementation of [`partition`](Self::partition).
     ///
-    /// The reason this was pulled out is that we need to have a variant of `partition` that works w/ sync functions,
-    /// and one that works w/ async. Using an iterator as an intermediate representation was the best way to achieve
+    /// The reason this was pulled out is that we need to have a variant of `partition` that works with sync functions,
+    /// and one that works async. Using an iterator as an intermediate representation was the best way to achieve
     /// this (so we don't need to clone the entire implementation).
     fn partition_iter(
         &mut self,
         batch: RecordBatch,
-    ) -> Result<impl Iterator<Item = Result<(usize, RecordBatch)>> + Send + '_> {
+    ) -> Result<
+        impl Iterator<Item = Result<(usize, RecordBatch), Report>> + Send + '_,
+        Report,
+    > {
         let BatchPartitionerState {
-            // random_state,
             range_exprs,
             hash_exprs,
             num_partitions: partitions,
             hash_buffer,
         } = &mut self.state;
-        let it: Box<dyn Iterator<Item = Result<(usize, RecordBatch)>> + Send> = {
+        let it: Box<dyn Iterator<Item = Result<(usize, RecordBatch), Report>> + Send> = {
             let timer = self.timer.timer();
 
             let range_arrays = [range_exprs.clone()]
                 .concat()
                 .iter()
                 .map(|expr| expr.evaluate(&batch)?.into_array(batch.num_rows()))
-                .collect::<Result<Vec<_>>>()?;
+                .collect::<Result<Vec<_>, DataFusionError>>()?;
 
             let hash_arrays = hash_exprs
                 .iter()
                 .map(|expr| expr.evaluate(&batch)?.into_array(batch.num_rows()))
-                .collect::<Result<Vec<_>>>()?;
+                .collect::<Result<Vec<_>, DataFusionError>>()?;
 
             hash_buffer.clear();
             hash_buffer.resize(batch.num_rows(), 0);
@@ -271,10 +268,8 @@ impl BatchPartitioner {
             create_hashes(&hash_arrays, hash_buffer)?;
             create_hashes(&range_arrays, &mut range_buffer)?;
 
-            let mut indices: Vec<HashMap<u32, UInt64Builder>> = (0..*partitions)
-                .map(|_| HashMap::new())
-                // .map(|_| UInt64Builder::with_capacity(batch.num_rows()))
-                .collect();
+            let mut indices: Vec<HashMap<u32, UInt64Builder>> =
+                (0..*partitions).map(|_| HashMap::new()).collect();
 
             for (index, (hash, range_hash)) in
                 hash_buffer.iter().zip(range_buffer).enumerate()
@@ -308,12 +303,12 @@ impl BatchPartitioner {
                             arrow::compute::take(c.as_ref(), &indices, None)
                                 .map_err(|e| DataFusionError::ArrowError(e, None))
                         })
-                        .collect::<Result<Vec<ArrayRef>>>()?;
+                        .collect::<Result<Vec<ArrayRef>, DataFusionError>>()?;
 
                     let batch = RecordBatch::try_new(batch.schema(), columns)?;
 
-                    // bind timer so it drops w/ this iterator
-                    let _ = &timer;
+                    // bind timer so it drops at the end of this iterator
+                    let _time = &timer;
 
                     Ok((partition, batch))
                 });
@@ -336,7 +331,6 @@ struct RepartitionMetrics {
     /// Repartitioning elapsed time in nanos
     repartition_time: metrics::Time,
     /// Time in nanos for sending resulting batches to channels.
-    ///
     /// One metric per output partition.
     send_time: Vec<metrics::Time>,
 }
@@ -407,54 +401,6 @@ pub struct RepartitionByRangeAndHashExec {
 }
 
 impl RepartitionByRangeAndHashExec {
-    /// Input execution plan
-    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
-        &self.input
-    }
-
-    /// Range Partitioning scheme to use
-    pub fn range_partitioning(&self) -> Vec<Arc<dyn PhysicalExpr>> {
-        self.range_partitioning_expr.clone()
-    }
-
-    /// Hash Partitioning scheme to use
-    pub fn hash_partitioning(&self) -> Partitioning {
-        self.hash_partitioning.clone()
-    }
-
-    /// Get name used to display this Exec
-    pub fn name(&self) -> &str {
-        "RepartitionByRangeAndHashExec"
-    }
-}
-
-impl DisplayAs for RepartitionByRangeAndHashExec {
-    fn fmt_as(
-        &self,
-        t: DisplayFormatType,
-        f: &mut std::fmt::Formatter,
-    ) -> std::fmt::Result {
-        match t {
-            DisplayFormatType::Default | DisplayFormatType::Verbose => {
-                write!(
-                    f,
-                    "{}: hash_partitioning={}, input_partitions={}",
-                    self.name(),
-                    self.hash_partitioning,
-                    self.input.output_partitioning().partition_count()
-                )?;
-
-                if let Some(sort_exprs) = self.sort_exprs() {
-                    write!(f, ", sort_exprs={:?}", sort_exprs)?;
-                }
-                Ok(())
-            }
-            DisplayFormatType::TreeRender => todo!(),
-        }
-    }
-}
-
-impl RepartitionByRangeAndHashExec {
     /// Create a new RepartitionExec, that produces output `partitioning`, and
     /// does not preserve the order of the input (see [`datafusion::physical_plan::repartition::RepartitionExec::preserve_order`]
     /// for more details)
@@ -462,7 +408,7 @@ impl RepartitionByRangeAndHashExec {
         input: Arc<dyn ExecutionPlan>,
         range_partitioning_expr: Vec<Arc<dyn PhysicalExpr>>,
         hash_partitioning: Partitioning,
-    ) -> Result<Self> {
+    ) -> Result<Self, Report> {
         let preserve_order = false;
         if let Some(ordering) = input.output_ordering() {
             let lhs = ordering
@@ -470,18 +416,15 @@ impl RepartitionByRangeAndHashExec {
                 .map(|sort_expr| sort_expr.expr.clone())
                 .collect::<Vec<_>>();
             let rhs = [
-                range_partitioning_expr.clone(),
-                match &hash_partitioning {
-                    Partitioning::Hash(hash_exprs, _) => hash_exprs.clone(),
-                    _ => {
-                        return Err(DataFusionError::Plan(format!(
-                            "Invalid hash_partitioning={} for RepartitionByRangeAndHashExec",
-                            hash_partitioning
-                        )));
-                    }
-                },
-            ]
-            .concat();
+                    range_partitioning_expr.clone(),
+                    match &hash_partitioning {
+                        Partitioning::Hash(hash_exprs, _) => hash_exprs.clone(),
+                        _ => {
+                            bail!( "Invalid hash_partitioning={} for RepartitionByRangeAndHashExec",hash_partitioning);
+                        }
+                    },
+                ]
+                .concat();
 
             if physical_exprs_equal(&lhs, &rhs) {
                 return Ok(Self {
@@ -500,12 +443,12 @@ impl RepartitionByRangeAndHashExec {
                 });
             }
         }
-        Err(DataFusionError::Plan(format!(
-            "Input ordering {:?} mismatch for RepartitionByRangeAndHashExec with range_partitioning_expr={:?}, hash_partitioning={}",
+        bail!(
+            "Input ordering  {:?} mismatch  range_partitioning_expr={:?}, hash_partitioning={}",
             input.output_ordering(),
             range_partitioning_expr,
             hash_partitioning,
-        )))
+        );
     }
 
     /// Return the sort expressions that are used to merge
@@ -527,8 +470,8 @@ impl RepartitionByRangeAndHashExec {
         range_partitioning: Vec<Arc<dyn PhysicalExpr>>,
         hash_partitioning: Partitioning,
         metrics: RepartitionMetrics,
-        context: Arc<TaskContext>,
-    ) -> Result<()> {
+        task_ctx: Arc<TaskContext>,
+    ) -> Result<(), Report> {
         let mut partitioner = BatchPartitioner::try_new(
             range_partitioning,
             hash_partitioning,
@@ -537,7 +480,7 @@ impl RepartitionByRangeAndHashExec {
 
         // execute the child operator
         let timer = metrics.fetch_time.timer();
-        let mut stream = input.execute(partition, context)?;
+        let mut stream = input.execute(partition, task_ctx)?;
         timer.done();
 
         // While there are still outputs to send to, keep pulling inputs
@@ -605,7 +548,7 @@ impl RepartitionByRangeAndHashExec {
     /// complete. Upon error, propagates the errors to all output tx
     /// channels.
     async fn wait_for_task(
-        input_task: SpawnedTask<Result<()>>,
+        input_task: SpawnedTask<Result<(), Report>>,
         txs: HashMap<usize, DistributionSender<MaybeBatch>>,
     ) {
         // wait for completion, and propagate error
@@ -626,11 +569,13 @@ impl RepartitionByRangeAndHashExec {
             }
             // Error from running input task
             Ok(Err(e)) => {
-                let e = Arc::new(e);
+                let boxed_report = e.into_boxed_error();
+                let arc_report: Arc<dyn Error + Send + Sync> = boxed_report.into();
 
                 for (_, tx) in txs {
                     // wrap it because need to send error to all output partitions
-                    let err = Err(DataFusionError::External(Box::new(Arc::clone(&e))));
+                    let err =
+                        Err(DataFusionError::External(Box::new(arc_report.clone())));
                     tx.send(Some(err)).await.ok();
                 }
             }
@@ -642,6 +587,26 @@ impl RepartitionByRangeAndHashExec {
                 }
             }
         }
+    }
+
+    /// Input execution plan
+    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.input
+    }
+
+    /// Range Partitioning scheme to use
+    pub fn range_partitioning(&self) -> Vec<Arc<dyn PhysicalExpr>> {
+        self.range_partitioning_expr.clone()
+    }
+
+    /// Hash Partitioning scheme to use
+    pub fn hash_partitioning(&self) -> Partitioning {
+        self.hash_partitioning.clone()
+    }
+
+    /// Get name used to display this Exec
+    pub fn name() -> &'static str {
+        "RepartitionByRangeAndHashExec"
     }
 }
 
@@ -675,7 +640,7 @@ impl ExecutionPlanProperties for RepartitionByRangeAndHashExec {
 
 impl ExecutionPlan for RepartitionByRangeAndHashExec {
     fn name(&self) -> &str {
-        self.name()
+        Self::name()
     }
 
     /// Return a reference to Any that can be used for downcasting
@@ -704,12 +669,13 @@ impl ExecutionPlan for RepartitionByRangeAndHashExec {
     fn with_new_children(
         self: Arc<Self>,
         mut children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> Result<Arc<dyn ExecutionPlan>> {
+    ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         let repartition = RepartitionByRangeAndHashExec::try_new(
             children.swap_remove(0),
             self.range_partitioning_expr.clone(),
             self.hash_partitioning.clone(),
-        )?;
+        )
+        .map_err(|e| DataFusionError::External(e.into_boxed_error()))?;
 
         Ok(Arc::new(repartition))
     }
@@ -718,7 +684,7 @@ impl ExecutionPlan for RepartitionByRangeAndHashExec {
         &self,
         partition: usize,
         context: Arc<TaskContext>,
-    ) -> Result<SendableRecordBatchStream> {
+    ) -> Result<SendableRecordBatchStream, DataFusionError> {
         // clone all data that needs to be used in async block
         let metrics = self.metrics.clone();
         let lazy_state = self.state.clone();
@@ -777,7 +743,7 @@ impl ExecutionPlan for RepartitionByRangeAndHashExec {
                         Box::pin(PerPartitionStream {
                             schema: Arc::clone(&schema_captured),
                             receiver,
-                            _drop_helper: Arc::clone(&abort_helper),
+                            drop_helper: Arc::clone(&abort_helper),
                             reservation: Arc::clone(&reservation),
                         }) as SendableRecordBatchStream
                     })
@@ -805,7 +771,7 @@ impl ExecutionPlan for RepartitionByRangeAndHashExec {
                     num_input_partitions_processed: 0,
                     schema: input_schema,
                     input: rx.swap_remove(0),
-                    _drop_helper: abort_helper,
+                    abort_helper,
                     reservation,
                 }) as SendableRecordBatchStream)
             }
@@ -816,11 +782,39 @@ impl ExecutionPlan for RepartitionByRangeAndHashExec {
         Ok(Box::pin(stream))
     }
 
-    fn statistics(&self) -> Result<Statistics> {
-        self.input.statistics()
+    fn partition_statistics(
+        &self,
+        partition: Option<usize>,
+    ) -> Result<Statistics, DataFusionError> {
+        self.input.partition_statistics(partition)
     }
 }
 
+impl DisplayAs for RepartitionByRangeAndHashExec {
+    fn fmt_as(
+        &self,
+        t: DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        match t {
+            DisplayFormatType::Default | DisplayFormatType::Verbose => {
+                write!(
+                    f,
+                    "{}: hash_partitioning={}, input_partitions={}",
+                    Self::name(),
+                    self.hash_partitioning,
+                    self.input.output_partitioning().partition_count()
+                )?;
+
+                if let Some(sort_exprs) = self.sort_exprs() {
+                    write!(f, ", sort_exprs={:?}", sort_exprs)?;
+                }
+                Ok(())
+            }
+            DisplayFormatType::TreeRender => todo!(),
+        }
+    }
+}
 /// [`RepartitionStream`] is executed stream for [`RepartitionByRangeAndHashExec`].
 struct RepartitionStream {
     /// Number of input partitions that will be sending batches to this output channel
@@ -836,14 +830,14 @@ struct RepartitionStream {
     input: DistributionReceiver<MaybeBatch>,
 
     /// Handle to ensure background tasks are killed when no longer needed.
-    _drop_helper: Arc<Vec<SpawnedTask<()>>>,
+    abort_helper: Arc<Vec<SpawnedTask<()>>>,
 
     /// Memory reservation.
     reservation: SharedMemoryReservation,
 }
 
 impl Stream for RepartitionStream {
-    type Item = Result<RecordBatch>;
+    type Item = Result<RecordBatch, DataFusionError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -899,14 +893,14 @@ struct PerPartitionStream {
     receiver: DistributionReceiver<MaybeBatch>,
 
     /// Handle to ensure background tasks are killed when no longer needed.
-    _drop_helper: Arc<Vec<SpawnedTask<()>>>,
+    drop_helper: Arc<Vec<SpawnedTask<()>>>,
 
     /// Memory reservation.
     reservation: SharedMemoryReservation,
 }
 
 impl Stream for PerPartitionStream {
-    type Item = Result<RecordBatch>;
+    type Item = Result<RecordBatch, DataFusionError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,

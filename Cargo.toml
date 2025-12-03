@@ -9,7 +9,7 @@ members = [
     "rust/lakesoul-metadata-c",
     "rust/proto",
     "rust/lakesoul-io",
-    "rust/lakesoul-io-c",
+    # "rust/lakesoul-io-c",
     # "rust/lakesoul-datafusion",
     # "rust/lakesoul-flight",
     # "rust/lakesoul-s3-proxy",
@@ -32,6 +32,7 @@ version = "0.1.0"
 [workspace.dependencies]
 datafusion = { version = "48" }
 datafusion-common = { version = "48" }
+datafusion-common-runtime = { version = "48" }
 datafusion-session= { version = "48" }
 datafusion-expr = { version = "48" }
 datafusion-physical-expr = { version = "48" }

@@ -2,21 +2,109 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use anyhow::anyhow;
 use std::fmt::Debug;
 
 use arrow::array::{ArrayBuilder, UInt8Builder, as_primitive_array, as_string_array};
 use arrow_array::{Array, ArrowPrimitiveType, builder::*, types::*};
 use arrow_schema::DataType;
+use rootcause::prelude::IntoBoxedError;
+use rootcause::report;
 
-use crate::sorted_merge::sort_key_range::SortKeyArrayRangeVec;
-use crate::{
-    sum_all_with_primitive_type_and_append_value,
-    sum_last_with_primitive_type_and_append_value,
-};
-use arrow::error::ArrowError;
-use datafusion::arrow::error::Result as ArrowResult;
+use crate::physical_plan::sorted_merge::sort_key_range::SortKeyArrayRangeVec;
 
+use arrow::error::{ArrowError, Result as ArrowResult};
+
+macro_rules! sum_all_with_primitive_type_and_append_value {
+    ($primitive_type_name:ty, $native_ty:ty, $primitive_builder_type:ty, $builder:ident, $ranges:ident) => {{
+        let mut is_none = false;
+        let mut res = <$primitive_type_name>::default_value();
+        for range in $ranges.iter() {
+            let array = range.array();
+            let arr = as_primitive_array::<$primitive_type_name>(array.as_ref());
+            let values = arr.values();
+            let null_buffer = arr.nulls();
+            match null_buffer {
+                Some(buffer) => {
+                    let offset = arr.offset();
+                    let null_buf_range = buffer
+                        .slice(offset + range.begin_row, range.end_row - range.begin_row);
+                    // the entire range is null
+                    if null_buf_range.null_count() > 0 {
+                        is_none = true;
+                        break;
+                    }
+                }
+                None => {}
+            }
+            res += values[range.begin_row..range.end_row]
+                .iter()
+                .sum::<$native_ty>();
+        }
+        let res = match is_none {
+            // sum result is null if null value exists
+            true => MergeResult::AppendNull,
+            false => {
+                $builder
+                    .as_any_mut()
+                    .downcast_mut::<$primitive_builder_type>()
+                    .ok_or(ArrowError::ExternalError(
+                        report!("inner type mismatch").into_boxed_error(),
+                    ))?
+                    .append_value(res);
+                MergeResult::AppendValue($builder.len() - 1)
+            }
+        };
+        Ok(res)
+    }};
+}
+
+macro_rules! sum_last_with_primitive_type_and_append_value {
+    ($primitive_type_name:ty, $native_ty:ty, $primitive_builder_type:ty, $builder:ident, $ranges:ident) => {{
+        let mut is_none = false;
+        let mut res = <$primitive_type_name>::default_value();
+        let num_ranges = $ranges.len();
+        for (idx, range) in $ranges.iter().enumerate() {
+            let array = range.array();
+            let arr = as_primitive_array::<$primitive_type_name>(array.as_ref());
+            let values = arr.values();
+
+            if range.end_row == range.array().len() {
+                if idx == num_ranges - 1
+                    || $ranges[idx + 1].stream_idx != $ranges[idx].stream_idx
+                {
+                    if !arr.is_null(range.end_row - 1) {
+                        res += values[range.end_row - 1]
+                    } else {
+                        is_none = true;
+                        break;
+                    }
+                }
+            } else {
+                if !arr.is_null(range.end_row - 1) {
+                    res += values[range.end_row - 1]
+                } else {
+                    is_none = true;
+                    break;
+                }
+            }
+        }
+        let res = match is_none {
+            // sum result is null if null value exists
+            true => MergeResult::AppendNull,
+            false => {
+                $builder
+                    .as_any_mut()
+                    .downcast_mut::<$primitive_builder_type>()
+                    .ok_or(ArrowError::ExternalError(
+                        report!("inner type mismatch").into_boxed_error(),
+                    ))?
+                    .append_value(res);
+                MergeResult::AppendValue($builder.len() - 1)
+            }
+        };
+        Ok(res)
+    }};
+}
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub enum MergeOperator {
     #[default]
@@ -125,11 +213,15 @@ impl MergeOperator {
                 MergeOperator::UseLast => MergeResult::Extend(
                     ranges
                         .last()
-                        .ok_or(ArrowError::ExternalError(anyhow!("wrong ranges").into()))?
+                        .ok_or(ArrowError::ExternalError(
+                            report!("wrong ranges").into_boxed_error(),
+                        ))?
                         .batch_idx,
                     ranges
                         .last()
-                        .ok_or(ArrowError::ExternalError(anyhow!("wrong ranges").into()))?
+                        .ok_or(ArrowError::ExternalError(
+                            report!("wrong ranges").into_boxed_error(),
+                        ))?
                         .end_row
                         - 1,
                 ),
@@ -416,7 +508,7 @@ fn concat_all_with_string_type(
                 .as_any_mut()
                 .downcast_mut::<StringBuilder>()
                 .ok_or(ArrowError::ExternalError(
-                    anyhow!("inner type mismatch").into(),
+                    report!("inner type mismatch").into_boxed_error(),
                 ))?
                 .append_value(res);
             MergeResult::AppendValue(append_array_data_builder.len() - 1)
@@ -472,107 +564,13 @@ fn concat_last_with_string_type(
                 .as_any_mut()
                 .downcast_mut::<StringBuilder>()
                 .ok_or(ArrowError::ExternalError(
-                    anyhow!("inner type mismatch").into(),
+                    report!("inner type mismatch").into_boxed_error(),
                 ))?
                 .append_value(res);
             MergeResult::AppendValue(append_array_data_builder.len() - 1)
         }
     };
     Ok(res)
-}
-
-#[macro_export]
-macro_rules! sum_all_with_primitive_type_and_append_value {
-    ($primitive_type_name:ty, $native_ty:ty, $primitive_builder_type:ty, $builder:ident, $ranges:ident) => {{
-        let mut is_none = false;
-        let mut res = <$primitive_type_name>::default_value();
-        for range in $ranges.iter() {
-            let array = range.array();
-            let arr = as_primitive_array::<$primitive_type_name>(array.as_ref());
-            let values = arr.values();
-            let null_buffer = arr.nulls();
-            match null_buffer {
-                Some(buffer) => {
-                    let offset = arr.offset();
-                    let null_buf_range = buffer
-                        .slice(offset + range.begin_row, range.end_row - range.begin_row);
-                    // the entire range is null
-                    if null_buf_range.null_count() > 0 {
-                        is_none = true;
-                        break;
-                    }
-                }
-                None => {}
-            }
-            res += values[range.begin_row..range.end_row]
-                .iter()
-                .sum::<$native_ty>();
-        }
-        let res = match is_none {
-            // sum result is null if null value exists
-            true => MergeResult::AppendNull,
-            false => {
-                $builder
-                    .as_any_mut()
-                    .downcast_mut::<$primitive_builder_type>()
-                    .ok_or(ArrowError::ExternalError(
-                        anyhow!("inner type mismatch").into(),
-                    ))?
-                    .append_value(res);
-                MergeResult::AppendValue($builder.len() - 1)
-            }
-        };
-        Ok(res)
-    }};
-}
-
-#[macro_export]
-macro_rules! sum_last_with_primitive_type_and_append_value {
-    ($primitive_type_name:ty, $native_ty:ty, $primitive_builder_type:ty, $builder:ident, $ranges:ident) => {{
-        let mut is_none = false;
-        let mut res = <$primitive_type_name>::default_value();
-        let num_ranges = $ranges.len();
-        for (idx, range) in $ranges.iter().enumerate() {
-            let array = range.array();
-            let arr = as_primitive_array::<$primitive_type_name>(array.as_ref());
-            let values = arr.values();
-
-            if range.end_row == range.array().len() {
-                if idx == num_ranges - 1
-                    || $ranges[idx + 1].stream_idx != $ranges[idx].stream_idx
-                {
-                    if !arr.is_null(range.end_row - 1) {
-                        res += values[range.end_row - 1]
-                    } else {
-                        is_none = true;
-                        break;
-                    }
-                }
-            } else {
-                if !arr.is_null(range.end_row - 1) {
-                    res += values[range.end_row - 1]
-                } else {
-                    is_none = true;
-                    break;
-                }
-            }
-        }
-        let res = match is_none {
-            // sum result is null if null value exists
-            true => MergeResult::AppendNull,
-            false => {
-                $builder
-                    .as_any_mut()
-                    .downcast_mut::<$primitive_builder_type>()
-                    .ok_or(ArrowError::ExternalError(
-                        anyhow!("inner type mismatch").into(),
-                    ))?
-                    .append_value(res);
-                MergeResult::AppendValue($builder.len() - 1)
-            }
-        };
-        Ok(res)
-    }};
 }
 
 #[cfg(test)]

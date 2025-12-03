@@ -11,14 +11,23 @@ use std::task::{Context, Poll};
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::{RecordBatch, RecordBatchOptions};
 
-use datafusion::error::Result;
-use datafusion::physical_expr::PhysicalExpr;
-use datafusion::physical_plan::{RecordBatchStream, SendableRecordBatchStream};
-
+use datafusion_common::DataFusionError;
+use datafusion_execution::{RecordBatchStream, SendableRecordBatchStream};
+use datafusion_physical_expr::PhysicalExpr;
 use futures::{Stream, StreamExt};
 
+/// Projection iterator refer from datafusion
+pub struct ProjectionStream {
+    /// The schema of the input stream.
+    pub(crate) schema: SchemaRef,
+    /// The expressions to project.
+    pub(crate) expr: Vec<Arc<dyn PhysicalExpr>>,
+    /// The input stream.
+    pub(crate) input: SendableRecordBatchStream,
+}
+
 impl ProjectionStream {
-    fn batch_project(&self, batch: &RecordBatch) -> Result<RecordBatch> {
+    fn batch_project(&self, batch: &RecordBatch) -> Result<RecordBatch, DataFusionError> {
         // records time on drop
         // let _timer = self.baseline_metrics.elapsed_compute().timer();
         let arrays = self
@@ -28,7 +37,7 @@ impl ProjectionStream {
                 expr.evaluate(batch)
                     .and_then(|v| v.into_array(batch.num_rows()))
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>, DataFusionError>>()?;
 
         if arrays.is_empty() {
             let options =
@@ -41,18 +50,8 @@ impl ProjectionStream {
     }
 }
 
-/// Projection iterator refer from datafusion
-pub struct ProjectionStream {
-    /// The schema of the input stream.
-    pub(crate) schema: SchemaRef,
-    /// The expressions to project.
-    pub(crate) expr: Vec<Arc<dyn PhysicalExpr>>,
-    /// The input stream.
-    pub(crate) input: SendableRecordBatchStream,
-}
-
 impl Stream for ProjectionStream {
-    type Item = Result<RecordBatch>;
+    type Item = Result<RecordBatch, DataFusionError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,

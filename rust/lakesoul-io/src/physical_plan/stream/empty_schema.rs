@@ -13,9 +13,8 @@ use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
 use arrow_schema::Schema;
 
-use datafusion::error::Result;
-use datafusion::physical_plan::RecordBatchStream;
-use datafusion_common::DataFusionError::ArrowError;
+use datafusion_common::DataFusionError;
+use datafusion_physical_plan::RecordBatchStream;
 
 /// A stream that yields record batches with an empty schema and a given number of rows.
 #[derive(Debug)]
@@ -38,7 +37,7 @@ impl EmptySchemaStream {
 }
 
 impl Stream for EmptySchemaStream {
-    type Item = Result<RecordBatch>;
+    type Item = Result<RecordBatch, DataFusionError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -56,7 +55,9 @@ impl Stream for EmptySchemaStream {
                 vec![],
                 &RecordBatchOptions::new().with_row_count(Some(row_count)),
             );
-            Poll::Ready(Some(batch.map_err(|e| ArrowError(e, None))))
+            Poll::Ready(Some(
+                batch.map_err(|e| DataFusionError::ArrowError(e, None)),
+            ))
         } else {
             Poll::Ready(None)
         }

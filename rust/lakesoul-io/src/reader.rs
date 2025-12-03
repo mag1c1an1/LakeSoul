@@ -69,44 +69,44 @@ use datafusion_execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_physical_plan::execute_stream;
 use rootcause::{Report, report};
 
-use crate::{config::IOConfig, data_source::LakeSoulSource};
+use crate::{config::IOConfig, physical_plan::data_source::LakeSoulSource};
 
-// /// A reader for LakeSoul tables that supports efficient reading of data with various optimizations.
-// ///
-// /// This reader provides functionality to:
-// /// - Read data from Parquet files
-// /// - Apply filters during reading
-// /// - Support partitioned tables
-// /// - Optimize reads using primary keys
-// /// - Handle both local and S3 storage
-// ///
-// /// # Thread Safety
-// ///
-// /// The reader is designed to be used in both synchronous and asynchronous contexts.
-// /// For synchronous usage, consider using `SyncSendableMutableLakeSoulReader`.
-// ///
-// /// # Examples
-// ///
-// /// ```rust
-// /// # tokio_test::block_on(async {
-// /// use lakesoul_io::lakesoul_reader::LakeSoulReader;
-// /// use lakesoul_io::lakesoul_io_config::LakeSoulIOConfigBuilder;
-// ///
-// /// let config = LakeSoulIOConfigBuilder::new()
-// ///     .with_files(vec!["path/to/file.parquet"])
-// ///     .with_thread_num(1)
-// ///     .with_batch_size(256)
-// ///     .build();
-// ///
-// /// let mut reader = LakeSoulReader::new(config)?;
-// /// reader.start().await?;
-// ///
-// /// while let Some(batch) = reader.next_rb().await {
-// ///     let record_batch = batch?;
-// ///     // Process the record batch
-// /// }
-// /// })
-// /// ```
+/// A reader for LakeSoul tables that supports efficient reading of data with various optimizations.
+///
+/// This reader provides functionality to:
+/// - Read data from Parquet files
+/// - Apply filters during reading
+/// - Support partitioned tables
+/// - Optimize reads using primary keys
+/// - Handle both local and S3 storage
+///
+/// # Thread Safety
+///
+/// The reader is designed to be used in both synchronous and asynchronous contexts.
+/// For synchronous usage, consider using `SyncSendableMutableLakeSoulReader`.
+///
+/// # Examples
+///
+/// ```rust
+/// # tokio_test::block_on(async {
+/// use lakesoul_io::lakesoul_reader::LakeSoulReader;
+/// use lakesoul_io::lakesoul_io_config::LakeSoulIOConfigBuilder;
+///
+/// let config = LakeSoulIOConfigBuilder::new()
+///     .with_files(vec!["path/to/file.parquet"])
+///     .with_thread_num(1)
+///     .with_batch_size(256)
+///     .build();
+///
+/// let mut reader = LakeSoulReader::new(config)?;
+/// reader.start().await?;
+///
+/// while let Some(batch) = reader.next_rb().await {
+///     let record_batch = batch?;
+///     // Process the record batch
+/// }
+/// })
+/// ```
 pub struct LakeSoulReader {
     task_ctx: Arc<TaskContext>,
     config: Arc<RwLock<IOConfig>>,
@@ -346,7 +346,7 @@ impl SyncSendableMutableLakeSoulReader {
         }
     }
 
-    /// Starts the reader in a blocking fashion.
+    /// Init the reader in a blocking fashion.
     ///
     /// # Returns
     ///
