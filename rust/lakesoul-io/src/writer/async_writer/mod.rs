@@ -48,6 +48,7 @@ pub struct FlusthOutput {
     pub object_meta: ObjectMeta,
     pub file_meta: FileMetaData,
 }
+
 /// The trait for the async batch writer.
 #[async_trait::async_trait]
 pub trait AsyncBatchWriter {

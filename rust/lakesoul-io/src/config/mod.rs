@@ -170,7 +170,7 @@ pub struct IOConfig {
     pub(crate) range_partitions: Vec<String>,
     /// Number of hash buckets for hash partitioning
     #[educe(Default = "1")]
-    hash_bucket_num: String,
+    pub(crate) hash_bucket_num: String,
     /// Names of columns to select
     #[deprecated(since = "2.5.0", note = "deprecated")]
     pub(crate) columns: Vec<String>,
@@ -245,7 +245,7 @@ pub struct IOConfig {
     #[educe(Default = 8)]
     pub(crate) receiver_capacity: usize,
     /// task ctx for ffi reader/writer
-    task_ctx: Arc<TaskContext>,
+    pub(crate) task_ctx: Arc<TaskContext>,
 }
 
 impl IOConfig {

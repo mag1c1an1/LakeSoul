@@ -484,7 +484,7 @@ mod tests {
     fn test_single_channel_no_gate() {
         // use two channels so that the first one never hits the gate
         let (mut txs, mut rxs) = channels(2);
-        println!("{} {}",txs.len(),rxs.len());
+        println!("{} {}", txs.len(), rxs.len());
 
         let mut recv_fut = rxs[0].recv();
         let waker = poll_pending(&mut recv_fut);

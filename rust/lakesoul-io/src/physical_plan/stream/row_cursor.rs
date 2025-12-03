@@ -16,7 +16,7 @@
 // under the License.
 
 // Adpated from DataFusion 47.0.0
- 
+
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
 use arrow::row::{RowConverter, SortField};

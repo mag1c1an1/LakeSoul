@@ -65,11 +65,55 @@ impl MultiPartAsyncWriter {
         config: IOConfigRef,
         task_ctx: Arc<TaskContext>,
     ) -> Result<Self, Report> {
-        let io_config = config.read();
-        if io_config.files.is_empty() {
-            bail!("wrong number of file names provided for writer");
-        }
-        let file_name = &io_config.files.last().ok_or(report!("wrong file name"))?;
+        let (
+            batch_size,
+            multipart_chunk_size,
+            memory_buffer_capacity,
+            max_row_group_size,
+            file_name,
+            schema,
+            writer_schema,
+        ) = {
+            let conf = config.read();
+            if conf.files.is_empty() {
+                bail!("wrong number of file names provided for writer");
+            }
+            let file_name = conf.files.last().ok_or(report!("wrong file name"))?.clone();
+            let target_schema = conf.target_schema.0.clone();
+            let schema = uniform_schema(target_schema);
+
+            // O(nm), n = number of fields, m = number of range partitions
+            let schema_projection_excluding_range = schema
+                .fields()
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, field)| {
+                    match conf.range_partitions.contains(field.name()) {
+                        true => None,
+                        false => Some(idx),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let writer_schema =
+                project_schema(&schema, Some(&schema_projection_excluding_range))?;
+            let max_row_group_size = if conf.max_row_group_size * schema.fields().len()
+                > conf.max_row_group_num_values
+            {
+                conf.batch_size
+                    .max(conf.max_row_group_num_values / schema.fields().len())
+            } else {
+                conf.max_row_group_size
+            };
+            (
+                conf.batch_size,
+                conf.multipart_chunk_size,
+                conf.memory_buffer_capacity,
+                max_row_group_size,
+                file_name,
+                schema,
+                writer_schema,
+            )
+        };
 
         // local style path should have already been handled in create_session_context,
         // so we don't have to deal with ParseError::RelativeUrlWithoutBase here
@@ -85,45 +129,16 @@ impl MultiPartAsyncWriter {
 
         // get underlying multipart uploader
         let multipart_upload = object_store.put_multipart(&path).await?;
-        let write_multi_part = WriteMultipart::new_with_chunk_size(
-            multipart_upload,
-            io_config.multipart_chunk_size,
-        );
-        let in_mem_buf = InMemBuf::with_capacity(io_config.memory_buffer_capacity);
-
-        let schema = uniform_schema(io_config.target_schema.0.clone());
-
-        // O(nm), n = number of fields, m = number of range partitions
-        let schema_projection_excluding_range = schema
-            .fields()
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, field)| {
-                match io_config.range_partitions.contains(field.name()) {
-                    true => None,
-                    false => Some(idx),
-                }
-            })
-            .collect::<Vec<_>>();
-        let writer_schema =
-            project_schema(&schema, Some(&schema_projection_excluding_range))?;
-
-        let max_row_group_size = if io_config.max_row_group_size * schema.fields().len()
-            > io_config.max_row_group_num_values
-        {
-            io_config
-                .batch_size
-                .max(io_config.max_row_group_num_values / schema.fields().len())
-        } else {
-            io_config.max_row_group_size
-        };
+        let write_multi_part =
+            WriteMultipart::new_with_chunk_size(multipart_upload, multipart_chunk_size);
+        let in_mem_buf = InMemBuf::with_capacity(memory_buffer_capacity);
         let arrow_writer = ArrowWriter::try_new(
             in_mem_buf.clone(),
             writer_schema,
             Some(
                 WriterProperties::builder()
                     .set_max_row_group_size(max_row_group_size)
-                    .set_write_batch_size(io_config.batch_size)
+                    .set_write_batch_size(batch_size)
                     .set_compression(Compression::ZSTD(ZstdLevel::default()))
                     .set_dictionary_enabled(false) // disable dictionary encoding
                     .build(),
