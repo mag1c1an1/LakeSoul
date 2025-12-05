@@ -6,7 +6,8 @@
 
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
-use datafusion_common::{DataFusionError, Result};
+use datafusion_common::DataFusionError;
+use rootcause::Report;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::debug;
@@ -21,7 +22,7 @@ pub struct AsyncSendableMutableLakeSoulWriter {
 }
 
 impl AsyncSendableMutableLakeSoulWriter {
-    pub async fn try_new(config: IOConfigRef) -> Result<Self> {
+    pub async fn try_new(config: IOConfigRef) -> Result<Self, Report> {
         todo!()
         // let writer = create_writer(config.clone()).await?;
         // let schema = writer.schema();

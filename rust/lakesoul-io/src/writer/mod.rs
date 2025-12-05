@@ -56,61 +56,61 @@ pub type SendableWriter = Box<dyn AsyncBatchWriter + Send>;
 pub async fn create_writer(
     config: IOConfig,
 ) -> Result<Box<dyn async_writer::AsyncBatchWriter + Send>, Report> {
-    todo!()
-    //     // if aux sort cols exist, we need to adjust the schema of final writer
-    //     // to exclude all aux sort cols
-    //     let writer_schema: SchemaRef = if !config.aux_sort_cols.is_empty() {
-    //         let schema = config.target_schema.0.clone();
-    //         // O(nm), n = number of target schema fields, m = number of aux sort cols
-    //         let proj_indices = schema
-    //             .fields
-    //             .iter()
-    //             .filter(|f| !config.aux_sort_cols.contains(f.name()))
-    //             .map(|f| {
-    //                 schema.index_of(f.name().as_str()).map_err(|e| {
-    //                     DataFusionError::ArrowError(
-    //                         e,
-    //                         Some(format!("Failed to find index of column: {}", f.name())),
-    //                     )
-    //                 })
+    todo!();
+    // // if aux sort cols exist, we need to adjust the schema of final writer
+    // // to exclude all aux sort cols
+    // let writer_schema: SchemaRef = if !config.aux_sort_cols.is_empty() {
+    //     let schema = config.target_schema.0.clone();
+    //     // O(nm), n = number of target schema fields, m = number of aux sort cols
+    //     let proj_indices = schema
+    //         .fields
+    //         .iter()
+    //         .filter(|f| !config.aux_sort_cols.contains(f.name()))
+    //         .map(|f| {
+    //             schema.index_of(f.name().as_str()).map_err(|e| {
+    //                 DataFusionError::ArrowError(
+    //                     e,
+    //                     Some(format!("Failed to find index of column: {}", f.name())),
+    //                 )
     //             })
-    //             .collect::<Result<Vec<usize>>>()?;
-    //         Arc::new(schema.project(proj_indices.borrow())?)
-    //     } else {
-    //         config.target_schema.0.clone()
-    //     };
+    //         })
+    //         .collect::<Result<Vec<usize>>>()?;
+    //     Arc::new(schema.project(proj_indices.borrow())?)
+    // } else {
+    //     config.target_schema.0.clone()
+    // };
 
-    //     let mut writer_config = config.clone();
-    //     let writer: Box<dyn AsyncBatchWriter + Send> = if config.use_dynamic_partition {
-    //         Box::new(PartitioningAsyncWriter::try_new(writer_config)?)
-    //     } else if !writer_config.primary_keys.is_empty() && !writer_config.keep_ordering() {
-    //         // sort primary key table
-    //         writer_config.target_schema = IOSchema(uniform_schema(writer_schema));
-    //         if writer_config.files.is_empty() && !writer_config.prefix().is_empty() {
-    //             writer_config.files = vec![format!(
-    //                 "{}/part-{}_{:0>4}.parquet",
-    //                 writer_config.prefix(),
-    //                 rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 16),
-    //                 writer_config.hash_bucket_id()
-    //             )];
-    //         }
-    //         let writer = MultiPartAsyncWriter::try_new(writer_config).await?;
-    //         Box::new(SortAsyncWriter::try_new(writer, config)?)
-    //     } else {
-    //         // else multipart
-    //         writer_config.target_schema = IOSchema(uniform_schema(writer_schema));
-    //         if writer_config.files.is_empty() && !writer_config.prefix().is_empty() {
-    //             writer_config.files = vec![format!(
-    //                 "{}/part-{}_{:0>4}.parquet",
-    //                 writer_config.prefix(),
-    //                 rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 16),
-    //                 writer_config.hash_bucket_id()
-    //             )];
-    //         }
-    //         let writer = MultiPartAsyncWriter::try_new(writer_config).await?;
-    //         Box::new(writer)
-    //     };
-    //     Ok(writer)
+    // let mut writer_config = config.clone();
+    // let writer: Box<dyn AsyncBatchWriter + Send> = if config.use_dynamic_partition {
+    //     Box::new(PartitioningAsyncWriter::try_new(writer_config)?)
+    // } else if !writer_config.primary_keys.is_empty() && !writer_config.keep_ordering() {
+    //     // sort primary key table
+    //     writer_config.target_schema = IOSchema(uniform_schema(writer_schema));
+    //     if writer_config.files.is_empty() && !writer_config.prefix().is_empty() {
+    //         writer_config.files = vec![format!(
+    //             "{}/part-{}_{:0>4}.parquet",
+    //             writer_config.prefix(),
+    //             rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 16),
+    //             writer_config.hash_bucket_id()
+    //         )];
+    //     }
+    //     let writer = MultiPartAsyncWriter::try_new(writer_config).await?;
+    //     Box::new(SortAsyncWriter::try_new(writer, config)?)
+    // } else {
+    //     // else multipart
+    //     writer_config.target_schema = IOSchema(uniform_schema(writer_schema));
+    //     if writer_config.files.is_empty() && !writer_config.prefix().is_empty() {
+    //         writer_config.files = vec![format!(
+    //             "{}/part-{}_{:0>4}.parquet",
+    //             writer_config.prefix(),
+    //             rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 16),
+    //             writer_config.hash_bucket_id()
+    //         )];
+    //     }
+    //     let writer = MultiPartAsyncWriter::try_new(writer_config).await?;
+    //     Box::new(writer)
+    // };
+    // Ok(writer)
 }
 
 // // inner is sort writer
