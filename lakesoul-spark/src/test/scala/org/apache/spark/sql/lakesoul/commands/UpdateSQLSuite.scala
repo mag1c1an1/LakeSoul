@@ -56,6 +56,21 @@ class UpdateSQLSuite extends UpdateSuiteBase with LakeSoulSQLCommandTest {
       errMsgs = "There is a conflict from these SET columns" :: Nil)
   }
 
+   test("tmp") {
+     // set nested fields to null
+     checkUpdateJson(
+       lakeSoulTable =
+         """
+          {"a": {"c": {"d": 'RANDOM', "e": 'str'}, "g": 1}, "z": 10}
+          {"a": {"c": {"d": 'random2', "e": 'str2'}, "g": 2}, "z": 20}""",
+       updateWhere = "a.c.d = 'random2'",
+       set = "a.c = null" :: "a.g = null" :: Nil,
+       expected =
+         """
+          {"a": {"c": {"d": 'RANDOM', "e": 'str'}, "g": 1}, "z": 10}
+          {"a": {"c": null, "g": null}, "z": 20}""")
+   }
+
   override protected def executeUpdate(target: String,
                                        set: String,
                                        where: String = null): Unit = {
