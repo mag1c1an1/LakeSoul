@@ -29,6 +29,7 @@
 //! ```
 
 use arrow_array::RecordBatchReader;
+use arrow_cast::pretty::print_batches;
 use atomic_refcell::AtomicRefCell;
 use datafusion::datasource::file_format::parquet::ParquetFormat;
 use datafusion::physical_plan::SendableRecordBatchStream;
@@ -270,7 +271,17 @@ impl LakeSoulReader {
     /// An Option containing a Result with the next RecordBatch, or None if there are no more batches
     pub async fn next_rb(&mut self) -> Option<Result<RecordBatch>> {
         if let Some(stream) = &mut self.stream {
-            stream.next().await
+            let res = stream.next().await;
+            match res {
+                Some(Ok(rb)) => {
+                    let batches = [rb];
+                    print_batches(&batches).unwrap();
+                    let rb = batches.into_iter().next().unwrap();
+                    Some(Ok(rb))
+                }
+                Some(Err(e)) => Some(Err(e)),
+                None => None,
+            }
         } else {
             None
         }

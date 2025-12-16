@@ -12,6 +12,7 @@ import org.apache.spark.sql.lakesoul.test.{LakeSoulSQLCommandTest, LakeSoulTestS
 import org.apache.spark.sql.test.TestSparkSession
 import org.junit.runner.RunWith
 import org.scalatestplus.junit.JUnitRunner
+import scala.language.implicitConversions
 
 @RunWith(classOf[JUnitRunner])
 class UpdateSQLSuite extends UpdateSuiteBase with LakeSoulSQLCommandTest {
@@ -56,10 +57,33 @@ class UpdateSQLSuite extends UpdateSuiteBase with LakeSoulSQLCommandTest {
       errMsgs = "There is a conflict from these SET columns" :: Nil)
   }
 
+  test("tmp") {
+    checkUpdateJson(
+      lakeSoulTable =
+        """
+          {"a": {"c": {"d": 'RANDOM', "e": 'str'}, "g": 1}, "z": 10}
+          {"a": {"c": {"d": 'random2', "e": 'str2'}, "g": 2}, "z": 20}""",
+      updateWhere = "a.c.d = 'random2'",
+      set = "a.c = null" :: "a.g = null" :: Nil,
+      expected =
+        """
+          {"a": {"c": {"d": 'RANDOM', "e": 'str'}, "g": 1}, "z": 10}
+          {"a": {"c": null, "g": null}, "z": 20}""")
+  }
+
   override protected def executeUpdate(target: String,
                                        set: String,
                                        where: String = null): Unit = {
     val whereClause = Option(where).map(c => s"WHERE $c").getOrElse("")
     sql(s"UPDATE $target SET $set $whereClause")
+  }
+
+  override protected def checkUpdateJson(lakeSoulTable: Seq[String], source: Seq[String], updateWhere: String, set: Seq[String], expected: Seq[String]): Unit =  {
+    val dir = "/tmp/lakesoul/wrong/"
+    def toDF(jsonStrs: Seq[String]) = spark.read.json(jsonStrs.toDS)
+
+    toDF(lakeSoulTable).write.format("lakesoul").mode("overwrite").save(dir.toString)
+    executeUpdate(s"lakesoul.default.`$dir`", set, updateWhere)
+    checkAnswer(readLakeSoulTable(dir.toString), toDF(expected))
   }
 }
