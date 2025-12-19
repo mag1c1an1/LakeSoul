@@ -18,9 +18,11 @@ use std::{env, sync::Arc};
 
 use catalog::LakeSoulCatalog;
 use datafusion::{
-    config::Dialect, execution::{
+    config::Dialect,
+    execution::{
         SessionStateBuilder, object_store::ObjectStoreUrl, runtime_env::RuntimeEnv,
-    }, prelude::{SessionConfig, SessionContext}
+    },
+    prelude::{SessionConfig, SessionContext},
 };
 use datasource::table_factory::LakeSoulTableProviderFactory;
 pub use error::{LakeSoulError, Result};

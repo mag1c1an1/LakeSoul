@@ -162,7 +162,7 @@ mod upsert_with_metadata_tests {
         let sess_ctx = create_session_context(&mut builder.clone().build())?;
 
         let dataframe = lakesoul_table.to_dataframe(&sess_ctx).await?;
-        let schema = SchemaRef::new(dataframe.schema().into());
+        let schema = SchemaRef::new(dataframe.schema().as_arrow().clone());
 
         let dataframe = if let Some(f) = filters {
             dataframe.filter(Parser::parse(f.clone(), schema)?)?
@@ -225,7 +225,7 @@ mod upsert_with_metadata_tests {
         let sess_ctx = create_session_context(&mut builder.clone().build())?;
 
         let dataframe = lakesoul_table.to_dataframe(&sess_ctx).await?;
-        let schema = SchemaRef::new(dataframe.schema().into());
+        let schema = SchemaRef::new(dataframe.schema().as_arrow().clone());
 
         let dataframe = if let Some(f) = filters {
             dataframe.filter(Parser::parse(f.clone(), schema)?)?
