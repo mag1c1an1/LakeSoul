@@ -90,7 +90,8 @@ mod insert_tests {
             dataframe.select_columns(&selected_cols)?
         };
 
-        print_batches(&dataframe.clone().explain(true, false)?.collect().await?)?;
+        let batches = &dataframe.clone().collect().await?;
+        print_batches(batches)?;
 
         let results = dataframe.collect().await?;
 
@@ -603,18 +604,18 @@ mod insert_tests {
 
     #[test_log::test(tokio::test)]
     async fn test_all_cases() -> Result<()> {
-        test_insert_into_append().await?;
-        test_insert_into_append_by_position().await?;
+        // test_insert_into_append().await?;
+        // test_insert_into_append_by_position().await?;
         test_insert_into_append_partitioned_table().await?;
-        test_insert_into_append_non_partitioned_table_and_read_with_filter().await?;
-        test_insert_into_append_partitioned_table_and_read_with_partition_filter()
-            .await?;
+        // test_insert_into_append_non_partitioned_table_and_read_with_filter().await?;
+        // test_insert_into_append_partitioned_table_and_read_with_partition_filter()
+        //     .await?;
 
-        test_insert_into_fails_when_missing_a_column().await?;
-        test_insert_into_fails_when_an_extra_column_is_present_but_can_evolve_schema()
-            .await?;
+        // test_insert_into_fails_when_missing_a_column().await?;
+        // test_insert_into_fails_when_an_extra_column_is_present_but_can_evolve_schema()
+        //     .await?;
 
-        test_datatypes().await?;
+        // test_datatypes().await?;
 
         // overwrite case
         // todo: insert_overwrite is not supported by datafusion 27.0

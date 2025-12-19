@@ -77,6 +77,11 @@ pub fn create_lakesoul_session_ctx(
         .execution
         .parquet
         .pushdown_filters = true;
+    // TODO use this
+    session_config
+        .options_mut()
+        .execution
+        .listing_table_factory_infer_partitions = false;
 
     let planner = LakeSoulQueryPlanner::new_ref();
 

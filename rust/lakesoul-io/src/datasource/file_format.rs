@@ -237,7 +237,7 @@ impl FileFormat for LakeSoulParquetFormat {
         mut conf: FileScanConfig,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let table_schema = LakeSoulTableProvider::compute_table_schema(
-            conf.table_schema.file_schema().clone(), // todo try table schema
+            conf.table_schema.table_schema().clone(), // todo try table schema
             &self.conf,
         )?;
 
