@@ -7,19 +7,10 @@
 use std::sync::Arc;
 use std::{any::Any, collections::HashMap};
 
-use crate::config::LakeSoulIOConfig;
-use crate::default_column_stream::DefaultColumnStream;
-use crate::default_column_stream::empty_schema_stream::EmptySchemaStream;
-use crate::filter::parser::{FilterContainer, Parser as FilterParser};
-use crate::sorted_merge::merge_operator::MergeOperator;
-use crate::sorted_merge::sorted_stream_merger::{
-    SortedStream, build_sorted_stream_merger,
-};
 use arrow_schema::{Field, Schema, SchemaRef};
 use datafusion::catalog::memory::DataSourceExec;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::memory_pool::{MemoryConsumer, MemoryReservation};
-
 use datafusion::logical_expr::Expr;
 use datafusion::physical_expr::{EquivalenceProperties, LexOrdering};
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
@@ -32,8 +23,19 @@ use datafusion::{
         DisplayAs, DisplayFormatType, ExecutionPlan, SendableRecordBatchStream,
     },
 };
-use datafusion_common::{DFSchemaRef, DataFusionError, Result};
+use datafusion_common::{DFSchemaRef, DataFusionError, Result as DFResult};
 use datafusion_substrait::substrait::proto::Plan;
+use rootcause::compat::boxed_error::IntoBoxedError;
+
+use crate::Result;
+use crate::config::LakeSoulIOConfig;
+use crate::default_column_stream::DefaultColumnStream;
+use crate::default_column_stream::empty_schema_stream::EmptySchemaStream;
+use crate::filter::parser::{FilterContainer, Parser as FilterParser};
+use crate::sorted_merge::merge_operator::MergeOperator;
+use crate::sorted_merge::sorted_stream_merger::{
+    SortedStream, build_sorted_stream_merger,
+};
 
 /// [`ExecutionPlan`] implementation for the merge on read operation.
 #[derive(Debug)]
@@ -212,7 +214,7 @@ impl ExecutionPlan for MergeParquetExec {
     fn with_new_children(
         self: Arc<Self>,
         inputs: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> Result<Arc<dyn ExecutionPlan>> {
+    ) -> DFResult<Arc<dyn ExecutionPlan>> {
         Ok(Arc::new(Self {
             schema: self.schema(),
             inputs,
@@ -228,7 +230,7 @@ impl ExecutionPlan for MergeParquetExec {
         &self,
         partition: usize,
         context: Arc<TaskContext>,
-    ) -> Result<SendableRecordBatchStream> {
+    ) -> DFResult<SendableRecordBatchStream> {
         if partition != 0 {
             return Err(DataFusionError::Internal(format!(
                 "Invalid requested partition {partition}. InsertExec requires a single input partition."
@@ -262,7 +264,11 @@ impl ExecutionPlan for MergeParquetExec {
             context.session_config().batch_size(),
             self.io_config.clone(),
             reservation,
-        )?;
+        )
+        .map_err(|e| {
+            error!("{e}");
+            e.into_boxed_error()
+        })?;
 
         Ok(merged_stream)
     }
@@ -405,5 +411,5 @@ pub async fn prune_filter_and_execute(
     // column pruning
     let df = df.select(cols)?;
     // return a stream
-    df.execute_stream().await
+    Ok(df.execute_stream().await?)
 }

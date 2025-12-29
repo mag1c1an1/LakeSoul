@@ -12,14 +12,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use crate::constant::{ConstEmptyArray, ConstNullArray};
-use crate::sorted_merge::merge_operator::{MergeOperator, MergeResult};
-use crate::sorted_merge::sort_key_range::{
-    SortKeyArrayRange, SortKeyArrayRangeVec, SortKeyBatchRange, SortKeyBatchRanges,
-};
-
-use super::sort_key_range::UseLastSortKeyBatchRanges;
-use crate::sorted_merge::cursor::CursorValues;
 use arrow::compute::interleave;
 use arrow::{
     array::{
@@ -27,13 +19,22 @@ use arrow::{
         make_array as make_arrow_array,
     },
     datatypes::{DataType, Field, SchemaRef},
-    error::ArrowError,
     error::Result as ArrowResult,
     record_batch::RecordBatch,
 };
 use arrow_array::types::*;
 use dary_heap::QuaternaryHeap;
 use nohash::BuildNoHashHasher;
+use rootcause::{Report, report};
+
+use super::sort_key_range::UseLastSortKeyBatchRanges;
+use crate::Result;
+use crate::constant::{ConstEmptyArray, ConstNullArray};
+use crate::sorted_merge::cursor::CursorValues;
+use crate::sorted_merge::merge_operator::{MergeOperator, MergeResult};
+use crate::sorted_merge::sort_key_range::{
+    SortKeyArrayRange, SortKeyArrayRangeVec, SortKeyBatchRange, SortKeyBatchRanges,
+};
 
 pub(crate) trait RangeCombinerTrait<C: CursorValues>: Unpin {
     fn push_range(&mut self, range: SortKeyBatchRange<C>);
@@ -46,11 +47,11 @@ pub enum RangeCombinerResult<C: CursorValues> {
     /// The combiner is finished.
     None,
     /// An error occurred.
-    Err(ArrowError),
+    Err(Report),
     /// A range.
     Range(SortKeyBatchRange<C>),
     /// A record batch.
-    RecordBatch(ArrowResult<RecordBatch>),
+    RecordBatch(Result<RecordBatch>),
 }
 
 /// The combiner for the sorted merge using a min heap.
@@ -168,7 +169,7 @@ impl<C: CursorValues> MinHeapSortKeyBatchRangeCombiner<C> {
 
     /// Build a record batch by merging the in-progress ranges.
     /// Construct [`Array`] for each column by columnarly merging the in-progress ranges.
-    fn build_record_batch(&mut self) -> ArrowResult<RecordBatch> {
+    fn build_record_batch(&mut self) -> Result<RecordBatch> {
         // construct record batch by columnarly merging
         let columns = self
             .schema
@@ -216,11 +217,11 @@ impl<C: CursorValues> MinHeapSortKeyBatchRangeCombiner<C> {
                     self.const_empty_array.get(field.data_type()),
                 )
             })
-            .collect::<ArrowResult<Vec<ArrayRef>>>()?;
+            .collect::<Result<Vec<ArrayRef>>>()?;
 
         self.in_progress.clear();
 
-        RecordBatch::try_new(self.schema.clone(), columns)
+        Ok(RecordBatch::try_new(self.schema.clone(), columns)?)
     }
 
     /// Initialize the current sort key range.
@@ -255,7 +256,7 @@ fn merge_sort_key_array_ranges(
     batch_idx_to_flatten_array_idx: &HashMap<usize, usize>,
     merge_operator: &MergeOperator,
     empty_array: ArrayRef,
-) -> ArrowResult<ArrayRef> {
+) -> Result<ArrayRef> {
     assert_eq!(ranges.len(), capacity);
     let data_type = (*field.data_type()).clone();
     let mut append_array_data_builder: Box<dyn ArrayBuilder> = match data_type {
@@ -316,7 +317,7 @@ fn merge_sort_key_array_ranges(
             };
             Ok(res)
         })
-        .collect::<ArrowResult<Vec<_>>>()?;
+        .collect::<Result<Vec<_>>>()?;
 
     let append_array = match append_array_data_builder.len() {
         0 => empty_array,
@@ -324,14 +325,14 @@ fn merge_sort_key_array_ranges(
     };
 
     flatten_dedup_arrays.push(append_array);
-    interleave(
+    Ok(interleave(
         flatten_dedup_arrays
             .iter()
             .map(|array_ref| array_ref.as_ref())
             .collect::<Vec<_>>()
             .as_slice(),
         extend_list.as_slice(),
-    )
+    )?)
 }
 
 /// The combiner for the sorted merge using a loser tree.
@@ -476,10 +477,11 @@ impl<C: CursorValues, const IS_PARTIAL_MERGE: bool>
     /// Otherwise, we use `build_record_batch` to build the record batch.
     pub fn poll(&mut self) -> RangeCombinerResult<C> {
         if self.ranges_counter < self.streams_num {
-            return RangeCombinerResult::Err(ArrowError::InvalidArgumentError(format!(
+            return RangeCombinerResult::Err(report!(
                 "Not all streams have been initialized, ranges_counter: {}, streams_num: {}",
-                self.ranges_counter, self.streams_num
-            )));
+                self.ranges_counter,
+                self.streams_num
+            ));
         }
         if self.in_progress.len() == self.target_batch_size {
             RangeCombinerResult::RecordBatch(self.build_record_batch())
@@ -524,7 +526,7 @@ impl<C: CursorValues, const IS_PARTIAL_MERGE: bool>
 
     /// For full column merge, all columns of each row have same batch idx.
     /// So we only need to build indices once and reuse them for all columns.
-    fn build_record_batch_full_merge(&mut self) -> ArrowResult<RecordBatch> {
+    fn build_record_batch_full_merge(&mut self) -> Result<RecordBatch> {
         let capacity = self.in_progress.len();
         let mut interleave_idx = Vec::<(usize, usize)>::with_capacity(capacity);
         interleave_idx.resize(capacity, (0, 0));
@@ -599,7 +601,7 @@ impl<C: CursorValues, const IS_PARTIAL_MERGE: bool>
 
         self.in_progress.clear();
 
-        RecordBatch::try_new(self.schema.clone(), columns)
+        Ok(RecordBatch::try_new(self.schema.clone(), columns)?)
     }
 
     /// Build a record batch by merging the in-progress ranges.
@@ -607,7 +609,7 @@ impl<C: CursorValues, const IS_PARTIAL_MERGE: bool>
     /// For UseLast merge operator, we still flatten all array ranges of current column_idx for interleave.
     /// However, we only need to collect last index of array ranges for each generated row, rather than compute the merge result.
     /// Finally, we interleave the flatten array and return the result.
-    fn build_record_batch(&mut self) -> ArrowResult<RecordBatch> {
+    fn build_record_batch(&mut self) -> Result<RecordBatch> {
         if !IS_PARTIAL_MERGE {
             return self.build_record_batch_full_merge();
         }
@@ -661,7 +663,7 @@ impl<C: CursorValues, const IS_PARTIAL_MERGE: bool>
 
         self.in_progress.clear();
 
-        RecordBatch::try_new(self.schema.clone(), columns)
+        Ok(RecordBatch::try_new(self.schema.clone(), columns)?)
     }
 
     /// Initialize the current sort key range.

@@ -3828,6 +3828,7 @@ dependencies = [
  "hdfs-sys",
  "hdrs",
  "hex",
+ "itertools 0.14.0",
  "lazy_static",
  "linked-hash-map",
  "moka",

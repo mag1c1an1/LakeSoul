@@ -1237,12 +1237,28 @@ pub extern "C" fn free_bytes_result(bytes: NonNull<CResult<BytesResult>>) {
 /// now use RUST_LOG=LEVEL to activate
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_logger_init() {
-    // TODO add logger format
     let timer = tracing_subscriber::fmt::time::ChronoLocal::rfc_3339();
-    let _ = tracing_subscriber::fmt()
+    match tracing_subscriber::fmt()
         .with_timer(timer)
+        .with_target(false)
+        .with_thread_names(true)
+        .with_file(true)
+        .with_line_number(true)
         .with_env_filter(EnvFilter::from_default_env())
-        .try_init();
+        .try_init()
+    {
+        Ok(_) => {}
+        Err(e) => {
+            if !e
+                .to_string()
+                .contains("a global default trace dispatcher has already been set")
+            {
+                let msg = format!("Failed to initialize tracing subscriber {:?}", e);
+                eprintln!("{}", msg);
+                panic!("{}", msg)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1720,6 +1736,7 @@ mod tests {
         flush_and_close_writer(writer, writer_callback);
         free_lakesoul_reader(reader);
     }
+
     #[test]
     fn log_test() {
         rust_logger_init();

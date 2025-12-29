@@ -269,12 +269,18 @@ impl FileFormat for LakeSoulMetaDataParquetFormat {
 
         let mut partitioned_exec = Vec::new();
         for (_, (partition_columnar_values, inputs)) in inputs_map {
-            let merge_exec = Arc::new(MergeParquetExec::new_with_inputs(
-                merged_schema.clone(),
-                inputs,
-                self.conf.clone(),
-                partition_columnar_values.clone(),
-            )?) as Arc<dyn ExecutionPlan>;
+            let merge_exec = Arc::new(
+                MergeParquetExec::new_with_inputs(
+                    merged_schema.clone(),
+                    inputs,
+                    self.conf.clone(),
+                    partition_columnar_values.clone(),
+                )
+                .map_err(|e| {
+                    error!("{e}");
+                    e.into_boxed_error()
+                })?,
+            ) as Arc<dyn ExecutionPlan>;
             partitioned_exec.push(merge_exec);
         }
         let exec = if partitioned_exec.len() > 1 {

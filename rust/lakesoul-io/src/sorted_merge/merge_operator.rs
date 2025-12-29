@@ -5,18 +5,18 @@
 use std::fmt::Debug;
 
 use arrow::array::{ArrayBuilder, UInt8Builder, as_primitive_array, as_string_array};
+use arrow::error::ArrowError;
 use arrow_array::{Array, ArrowPrimitiveType, builder::*, types::*};
 use arrow_schema::DataType;
+use datafusion::arrow::error::Result as ArrowResult;
 use rootcause::compat::boxed_error::IntoBoxedError;
 use rootcause::report;
 
 use crate::sorted_merge::sort_key_range::SortKeyArrayRangeVec;
 use crate::{
-    sum_all_with_primitive_type_and_append_value,
+    Result, sum_all_with_primitive_type_and_append_value,
     sum_last_with_primitive_type_and_append_value,
 };
-use arrow::error::ArrowError;
-use datafusion::arrow::error::Result as ArrowResult;
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub enum MergeOperator {
@@ -57,7 +57,7 @@ impl MergeOperator {
         data_type: DataType,
         ranges: &SortKeyArrayRangeVec,
         append_array_data_builder: &mut Box<dyn ArrayBuilder>,
-    ) -> ArrowResult<MergeResult> {
+    ) -> Result<MergeResult> {
         let res = match &ranges.len() {
             0 => MergeResult::AppendNull,
             1 => match self {
@@ -294,7 +294,7 @@ fn sum_last_with_primitive_type(
     dt: DataType,
     ranges: &SortKeyArrayRangeVec,
     append_array_data_builder: &mut Box<dyn ArrayBuilder>,
-) -> ArrowResult<MergeResult> {
+) -> Result<MergeResult> {
     match dt {
         DataType::UInt8 => {
             sum_last_with_primitive_type_and_append_value!(
@@ -569,9 +569,7 @@ macro_rules! sum_last_with_primitive_type_and_append_value {
                 $builder
                     .as_any_mut()
                     .downcast_mut::<$primitive_builder_type>()
-                    .ok_or(ArrowError::ExternalError(
-                        report!("inner type mismatch").into_boxed_error(),
-                    ))?
+                    .ok_or(report!("inner type mismatch"))?
                     .append_value(res);
                 MergeResult::AppendValue($builder.len() - 1)
             }

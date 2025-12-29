@@ -5,6 +5,7 @@ use datafusion_common::DFSchema;
 use datafusion_expr::Expr;
 use datafusion_substrait::substrait::proto::Plan;
 use educe::Educe;
+use itertools::Itertools;
 
 use crate::{
     Result,
@@ -685,6 +686,7 @@ impl LakeSoulIOConfig {
                 Parser::parse_filter_container(&dummy_ctx, &df_schema, container).await?,
             );
         }
+        debug!("parser filter exprs: {}", exprs.iter().format(","));
         Ok(exprs)
     }
 }

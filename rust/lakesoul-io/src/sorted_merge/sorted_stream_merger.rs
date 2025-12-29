@@ -11,13 +11,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use crate::sorted_merge::combiner::*;
-use crate::sorted_merge::merge_operator::MergeOperator;
-use crate::sorted_merge::sort_key_range::SortKeyBatchRange;
-
-use crate::default_column_stream::DefaultColumnStream;
-use crate::sorted_merge::cursor::{ArrayValues, CursorArray, CursorValues, RowValues};
-use crate::sorted_merge::stream::{FieldCursorStream, RowCursorStream};
 use arrow::array::*;
 use arrow::record_batch::RecordBatch;
 use arrow_array::{
@@ -26,15 +19,24 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, SortOptions};
 use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::error::Result;
+use datafusion::error::Result as DFResult;
 use datafusion::execution::memory_pool::MemoryReservation;
 use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
 use datafusion::physical_plan::{
     RecordBatchStream, SendableRecordBatchStream, expressions::col,
 };
-use datafusion_common::DataFusionError::{self, ArrowError};
+use datafusion_common::DataFusionError;
 use futures::stream::{Fuse, FusedStream};
 use futures::{Stream, StreamExt};
+use rootcause::compat::boxed_error::IntoBoxedError;
+
+use crate::Result;
+use crate::default_column_stream::DefaultColumnStream;
+use crate::sorted_merge::combiner::*;
+use crate::sorted_merge::cursor::{ArrayValues, CursorArray, CursorValues, RowValues};
+use crate::sorted_merge::merge_operator::MergeOperator;
+use crate::sorted_merge::sort_key_range::SortKeyBatchRange;
+use crate::sorted_merge::stream::{FieldCursorStream, RowCursorStream};
 
 /// A wrapper of sorted stream.
 pub(crate) struct SortedStream {
@@ -327,7 +329,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
     /// If the stream at the given index is not exhausted, and the last batch range for the
     /// stream is finished, poll the stream for the next RecordBatch and create a new
     /// batch range for the stream from the returned result
-    #[inline]
+    #[instrument(skip(self, cx))]
     fn maybe_poll_stream(
         &mut self,
         cx: &mut Context<'_>,
@@ -341,13 +343,20 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
         {
             let stream = &mut self.streams.streams[idx];
             if stream.is_terminated() {
+                debug!("stream[{idx}] terminated");
                 return Poll::Ready(Ok(()));
             }
 
             // Fetch a new input record and create a RecordBatchRanges from it
             match futures::ready!(stream.poll_next_unpin(cx)) {
-                None => return Poll::Ready(Ok(())),
+                None => {
+                    return {
+                        debug!("stream[{idx}] exhausted");
+                        Poll::Ready(Ok(()))
+                    };
+                }
                 Some(Err(e)) => {
+                    error!("{e}");
                     return Poll::Ready(Err(e));
                 }
                 Some(Ok(batch)) => {
@@ -365,9 +374,10 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
                         );
 
                         self.range_finished[idx] = false;
-
+                        debug!("push range in {}:{}", file!(), line!());
                         self.range_combiner.push_range(range);
                     } else {
+                        debug!("empty batch");
                         empty_batch = true;
                     }
                 }
@@ -389,6 +399,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<RecordBatch>>> {
         if self.aborted {
+            debug!("inner stream aborted");
             return Poll::Ready(None);
         }
 
@@ -397,10 +408,12 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
         let mut pending = false;
         for i in 0..self.streams.num_streams() {
             if !self.initialized[i] {
+                debug!("uninitialized stream[{}]", i);
                 match self.maybe_poll_stream(cx, i) {
                     Poll::Ready(r) => match r {
                         Ok(_) => {}
                         Err(e) => {
+                            error!("{}", e);
                             self.aborted = true;
                             return Poll::Ready(Some(Err(e)));
                         }
@@ -418,7 +431,8 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
         loop {
             match self.range_combiner.poll_result() {
                 RangeCombinerResult::Err(e) => {
-                    return Poll::Ready(Some(Err(ArrowError(Box::new(e), None))));
+                    error!("{}", e);
+                    return Poll::Ready(Some(Err(e)));
                 }
                 RangeCombinerResult::None => {
                     return Poll::Ready(None);
@@ -427,6 +441,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
                     let stream_idx = range.stream_idx();
 
                     if !range.is_finished() {
+                        debug!("push range in {}:{}", file!(), line!());
                         self.range_combiner.push_range(range)
                     } else {
                         // we should mark this stream uninitialized
@@ -436,6 +451,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
                         match futures::ready!(self.maybe_poll_stream(cx, stream_idx)) {
                             Ok(_) => {}
                             Err(e) => {
+                                error!("{}", e);
                                 self.aborted = true;
                                 return Poll::Ready(Some(Err(e)));
                             }
@@ -445,9 +461,7 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
                     // continue to produce range
                 }
                 RangeCombinerResult::RecordBatch(batch) => {
-                    return Poll::Ready(Some(
-                        batch.map_err(|e| ArrowError(Box::new(e), None)),
-                    ));
+                    return Poll::Ready(Some(batch));
                 }
             }
         }
@@ -455,13 +469,20 @@ impl<C: CursorValues, R: RangeCombinerTrait<C>> SortedStreamMerger<C, R> {
 }
 
 impl<C: CursorValues, R: RangeCombinerTrait<C>> Stream for SortedStreamMerger<C, R> {
-    type Item = Result<RecordBatch>;
+    type Item = DFResult<RecordBatch>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        self.poll_next_inner(cx)
+        self.poll_next_inner(cx).map(|inner| {
+            inner.map(|res| {
+                res.map_err(|e| {
+                    error!("{}", e);
+                    DataFusionError::External(e.into_boxed_error())
+                })
+            })
+        })
     }
 }
 
@@ -485,11 +506,14 @@ mod tests {
     use arrow::util::pretty::print_batches;
     use arrow_array::Float64Array;
     use datafusion::assert_batches_eq;
-    use datafusion::error::Result;
     use datafusion::execution::context::TaskContext;
+    use datafusion::execution::memory_pool::{GreedyMemoryPool, MemoryConsumer};
+    use datafusion::physical_plan::memory::LazyMemoryExec;
     use datafusion::physical_plan::{ExecutionPlan, common};
     use datafusion::prelude::{SessionConfig, SessionContext};
+    use parking_lot::lock_api::RwLock;
 
+    use crate::Result;
     use crate::config::LakeSoulIOConfigBuilder;
     use crate::helpers::InMemGenerator;
     use crate::reader::LakeSoulReader;
@@ -497,9 +521,6 @@ mod tests {
     use crate::sorted_merge::sorted_stream_merger::{
         SortedStream, build_sorted_stream_merger,
     };
-    use datafusion::execution::memory_pool::{GreedyMemoryPool, MemoryConsumer};
-    use datafusion::physical_plan::memory::LazyMemoryExec;
-    use parking_lot::lock_api::RwLock;
 
     fn create_batch_one_col_i32(name: &str, vec: &[i32]) -> RecordBatch {
         let a: ArrayRef = Arc::new(Int32Array::from(Vec::from(vec)));
@@ -808,7 +829,7 @@ mod tests {
                 "| id | a  | b    | c      |",
                 "+----+----+------+--------+",
                 "| 1  | 1  | 1.2  | 1001   |",
-                "| 1  | 9  | 2    | 102    |",
+                "| 1  | 9  | 2.0  | 102    |",
                 "| 3  | 3  |      | 10003  |",
                 "| 3  | 4  | 4.8  | 10004  |",
                 "| 4  | 9  | 4.8  | 15     |",
@@ -1009,7 +1030,7 @@ mod tests {
                 "+----+-----+------+-------+--------+",
                 "| id | a   | b    | c     | d      |",
                 "+----+-----+------+-------+--------+",
-                "| 1  | 10  | 2    | 102   |        |",
+                "| 1  | 10  | 2.0  | 102   |        |",
                 "| 3  | 30  | 4.8  | 201   |        |",
                 "| 4  | 40  | 1.2  | 20003 |        |",
                 "| 5  | 50  | 3.2  | 20006 | 33     |",

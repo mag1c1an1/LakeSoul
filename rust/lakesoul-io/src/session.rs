@@ -134,7 +134,7 @@ pub fn create_session_context_with_planner(
         )?;
         config.prefix = normalized_prefix;
     }
-    debug!("{}", &config.prefix);
+    debug!("prefix: {}", &config.prefix);
 
     // register object store(s) for input/output files' path
     // and replace file names with default fs concatenated if exist
@@ -240,7 +240,7 @@ impl LakeSoulIOSession {
             )?;
             config.prefix = normalized_prefix;
         }
-        debug!("{}", &config.prefix);
+        debug!("prefix: {}", &config.prefix);
 
         // register object store(s) for input/output files' path
         // and replace file names with default fs concatenated if exist
@@ -475,7 +475,7 @@ impl LakeSoulIOSession {
             match res.updated_node {
                 Some(sc) => {
                     debug!("apply new scan config");
-                    debug!("filters: {:?}", res.filters);
+                    debug!("filters in new node: {:?}", res.filters);
                     scan_config = sc
                         .as_any()
                         .downcast_ref::<FileScanConfig>()

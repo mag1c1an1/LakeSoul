@@ -81,6 +81,7 @@ walkdir = "2.5.0"
 num_cpus = "1.16"
 filetime = "0.2.25"
 linked-hash-map = "0.5.6"
+itertools = { workspace = true}
 # time
 chrono = "0.4"
 # logging

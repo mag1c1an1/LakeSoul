@@ -17,7 +17,6 @@
 
 // Adpated from DataFusion 47.0.0
 
-use crate::sorted_merge::cursor::{ArrayValues, CursorArray, RowValues};
 use arrow::array::Array;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
@@ -25,13 +24,17 @@ use arrow::row::{RowConverter, SortField};
 use datafusion::execution::memory_pool::MemoryReservation;
 use datafusion::physical_expr::{LexOrdering, PhysicalExpr, PhysicalSortExpr};
 use datafusion::physical_plan::SendableRecordBatchStream;
-use datafusion_common::Result;
+use datafusion_common::{DataFusionError, Result as DFResult};
 use futures::Stream;
 use futures::stream::{Fuse, StreamExt};
+use rootcause::report;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, ready};
+
+use crate::Result;
+use crate::sorted_merge::cursor::{ArrayValues, CursorArray, RowValues};
 
 /// A new type wrapper around a set of fused [`SendableRecordBatchStream`]
 /// that implements debug, and skips over empty [`RecordBatch`]
@@ -44,7 +47,7 @@ impl std::fmt::Debug for FusedStream {
 }
 
 impl FusedStream {
-    fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Option<Result<RecordBatch>>> {
+    fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Option<DFResult<RecordBatch>>> {
         loop {
             match ready!(self.0.poll_next_unpin(cx)) {
                 Some(Ok(b)) if b.num_rows() == 0 => continue,
@@ -97,7 +100,7 @@ impl RowCursorStream {
             .column_expressions
             .iter()
             .map(|expr| expr.evaluate(batch)?.into_array(batch.num_rows()))
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>, DataFusionError>>()?;
 
         let rows = self.converter.convert_columns(&cols)?;
         self.reservation.try_resize(self.converter.size())?;
@@ -117,7 +120,11 @@ impl Stream for RowCursorStream {
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         Poll::Ready(ready!(self.stream.poll_next(cx)).map(|r| {
-            r.and_then(|batch| {
+            r.map_err(|e| {
+                error!("{}", e);
+                report!("{}", e)
+            })
+            .and_then(|batch| {
                 let cursor = self.convert_batch(&batch)?;
                 Ok((cursor, batch))
             })
@@ -179,7 +186,11 @@ impl<T: CursorArray> Stream for FieldCursorStream<T> {
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         Poll::Ready(ready!(self.stream.poll_next(cx)).map(|r| {
-            r.and_then(|batch| {
+            r.map_err(|e| {
+                error!("{e}");
+                report!("{e}")
+            })
+            .and_then(|batch| {
                 let cursor = self.convert_batch(&batch)?;
                 Ok((cursor, batch))
             })

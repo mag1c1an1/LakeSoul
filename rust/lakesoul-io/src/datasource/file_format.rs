@@ -279,11 +279,17 @@ impl FileFormat for LakeSoulParquetFormat {
         .await?;
 
         // merge on read files
-        let merge_exec = Arc::new(MergeParquetExec::new(
-            merged_schema.clone(),
-            flatten_conf,
-            self.io_config.clone(),
-        )?);
+        let merge_exec = Arc::new(
+            MergeParquetExec::new(
+                merged_schema.clone(),
+                flatten_conf,
+                self.io_config.clone(),
+            )
+            .map_err(|e| {
+                error!("{e}");
+                e.into_boxed_error()
+            })?,
+        );
 
         if target_schema.fields().len() < merged_schema.fields().len() {
             let mut projection_expr = vec![];
