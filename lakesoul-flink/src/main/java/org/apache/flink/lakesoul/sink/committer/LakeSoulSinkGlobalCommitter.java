@@ -146,6 +146,7 @@ public class LakeSoulSinkGlobalCommitter
                         }
                     });
         }).join();
+        commitPool.shutdown();
 
         long endTime = System.currentTimeMillis();
         LOG.info("Global Committing done, #{}, object {}, time {}ms",

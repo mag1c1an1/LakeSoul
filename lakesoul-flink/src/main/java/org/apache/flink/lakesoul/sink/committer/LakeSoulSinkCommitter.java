@@ -72,6 +72,7 @@ public class LakeSoulSinkCommitter implements Committer<LakeSoulMultiTableSinkCo
                             }
                         });
             }).join();
+            customPool.shutdown();
         }
         long end = System.currentTimeMillis();
         LOG.info("Committing done, object {}, for {}ms", committables.hashCode(), end - start);
