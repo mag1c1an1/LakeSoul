@@ -68,7 +68,6 @@ impl MultiPartAsyncWriter {
             bail!("wrong number of file names provided for writer");
         }
 
-        error!(conf=?config);
         let file_name = &config.files.last().ok_or(report!("wrong file name"))?;
 
         // local style path should have already been handled in create_session_context,

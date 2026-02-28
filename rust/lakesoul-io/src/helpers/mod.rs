@@ -203,7 +203,6 @@ pub fn get_columnar_values(
 ///
 /// Returns a string representation of the [`datafusion::scalar::ScalarValue`]
 pub fn format_scalar_value(v: &ScalarValue) -> String {
-    error!(value = ?v);
     match v {
         ScalarValue::Date32(Some(days)) => format!(
             "{}",
