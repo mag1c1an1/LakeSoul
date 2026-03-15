@@ -10,13 +10,13 @@ import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.connector.jdbc.mysql.database.catalog.MySqlCatalog;
 import org.apache.flink.lakesoul.metadata.LakeSoulCatalog;
 import org.apache.flink.table.api.*;
-import org.apache.flink.table.catalog.Catalog;
+        import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 
 import java.sql.*;
-import java.time.LocalDate;
+        import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
@@ -126,32 +126,37 @@ public class JdbcIngest {
             }
 
             assert min != null;
-            LocalDate dbStart = min.toLocalDate();
+            LocalDateTime dbStart = min;
             assert max != null;
-            LocalDate dbEnd = max.toLocalDate();
-            LocalDate start = dbStart;
-            LocalDate end = dbEnd;
+            LocalDateTime dbEnd = max;
+            LocalDateTime start = dbStart;
+            LocalDateTime end = dbEnd;
 
             if (userStart != null) {
-                LocalDate userStartDate = LocalDate.parse(userStart);
+                LocalDateTime userStartDate = LocalDateTime.parse(userStart);
                 start = dbStart.isAfter(userStartDate) ? dbStart : userStartDate;
             }
 
             if (userEnd != null) {
-                LocalDate userEndDate = LocalDate.parse(userEnd);
+                LocalDateTime userEndDate = LocalDateTime.parse(userEnd);
                 end = dbEnd.isBefore(userEndDate) ? dbEnd : userEndDate;
             }
 
             System.out.println("start: " + start + " end: " + end);
 
+            if (tableName.equals("rt_dwd_fina_order_items_di") || tableName.equals("rt_dwd_fina_orders_di")) {
+                start = start.minusHours(8);
+                end = start.minusHours(8);
+            }
+
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
             int cnt = 0;
             StatementSet stmtSet = tEnv.createStatementSet();
-            for (LocalDate date = start;
+            for (LocalDateTime date = start;
                  !date.isAfter(end);
                  date = date.plusDays(1)) {
-                String dayStart = date.atStartOfDay().format(formatter);
-                String dayEnd = date.plusDays(1).atStartOfDay().format(formatter);
+                String dayStart = date.format(formatter);
+                String dayEnd = date.plusDays(1).format(formatter);
                 System.out.println("Submitting date: " + formatedCol + "=" + date);
 
                 String sql = String.format(
