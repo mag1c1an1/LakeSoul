@@ -23,7 +23,7 @@ public class BinarySourceRecord {
 
     private String tableLocation;
 
-    public  List<String> partitionKeys ;
+    public List<String> partitionKeys;
 
     private final boolean isDDLRecord;
 
@@ -49,8 +49,7 @@ public class BinarySourceRecord {
                               LakeSoulRowDataWrapper data,
                               String sourceRecordValue,
                               TableId tableId,
-                              boolean isDDL)
-    {
+                              boolean isDDL) {
 
         this.topic = topic;
         this.primaryKeys = primaryKeys;
@@ -71,21 +70,21 @@ public class BinarySourceRecord {
         String tableName;
         String originTableName;
         if (sinkDBName.equals(sourceSchemaName)
-                || sourceRecord.topic().split("\\.")[0].equals("mysql_binlog_source")){
+                || sourceRecord.topic().split("\\.")[0].equals("mysql_binlog_source")) {
             tableName = String.format("s_%s_%s", sourceSchemaName, tableId.table()).toLowerCase();
             originTableName = tableId.table();
             tableId = new TableId(sourceSchemaName, sinkDBName, tableName);
         } else {
             tableName = String.format("s_%s_%s_%s", sinkDBName, sourceSchemaName, tableId.table()).toLowerCase();
             originTableName = tableId.table();
-            tableId = new TableId( sourceSchemaName, sinkDBName , tableName);
+            tableId = new TableId(sourceSchemaName, sinkDBName, tableName);
         }
         HashMap<String, List<String>> topicsPartitionFields = convert.topicsPartitionFields;
         if (topicsPartitionFields.containsKey(originTableName)) {
             List<String> partitionColls = topicsPartitionFields.get(originTableName);
             topicsPartitionFields.remove(originTableName);
             topicsPartitionFields.put(tableName, partitionColls);
-            if (convert.formatRuleList.containsKey(originTableName)){
+            if (convert.formatRuleList.containsKey(originTableName)) {
                 HashMap<String, String> formatRuleList = convert.formatRuleList;
                 String fomatRule = formatRuleList.get(originTableName);
                 formatRuleList.remove(originTableName);
@@ -125,7 +124,7 @@ public class BinarySourceRecord {
                 }
             }
             long sortField = (binlogFileIndex << 32) + binlogPosition;
-            LakeSoulRowDataWrapper data = convert.toLakeSoulDataType(valueSchema, value, tableId, tsMs, sortField);
+            LakeSoulRowDataWrapper data = convert.toLakeSoulDataType(originTableName, valueSchema, value, tableId, tsMs, sortField);
             String tablePath;
             if (tableId.schema() == null) {
                 tablePath = new Path(new Path(basePath, tableId.catalog()), tableId.table()).toString();
@@ -135,7 +134,7 @@ public class BinarySourceRecord {
             List<String> newPartitionFields = convert.topicsPartitionFields.get(tableId.table());
             return new BinarySourceRecord(sourceRecord.topic(), primaryKeys, tableId,
                     FlinkUtil.makeQualifiedPath(tablePath).toString(),
-                    newPartitionFields == null ? Collections.emptyList(): newPartitionFields, false, data, null);
+                    newPartitionFields == null ? Collections.emptyList() : newPartitionFields, false, data, null);
         }
     }
 
@@ -175,6 +174,7 @@ public class BinarySourceRecord {
         SourceRecordJsonSerde serde = SourceRecordJsonSerde.getInstance();
         return serde.deserializeValue(topic, sourceRecordValue);
     }
+
     public static SourceRecord addEventDate(SourceRecord record, String eventDate) {
 
         Schema oldSchema = record.valueSchema();
