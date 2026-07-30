@@ -17,7 +17,8 @@ pyo3 = { version = "0.28", features = [
 ] }
 pyo3-log = "0.13"
 log = { workspace = true }
-lakesoul-io = { path = "../rust/lakesoul-io" }
+tracing-subscriber.workspace = true
+lakesoul-io = { path = "../rust/lakesoul-io", features = ["hdfs"] }
 lakesoul-common = { path = "../rust/lakesoul-common" }
 lakesoul-metadata = { path = "../rust/lakesoul-metadata" }
 proto = { path = "../rust/proto" }
@@ -30,16 +31,15 @@ arrow-schema.workspace = true
 arrow-array.workspace = true
 datafusion-common.workspace = true
 datafusion-execution.workspace = true
+datafusion-substrait.workspace = true
 futures.workspace = true
 prost.workspace = true
 rootcause.workspace = true
 serde_json.workspace = true
 
-[target.'cfg(target_os = "windows")'.dependencies]
-datafusion-substrait = { workspace = true }
-
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-datafusion-substrait = { workspace = true, features = ["protoc"] }
+# Keep host dependency features aligned with lakesoul-io-c during dist builds.
+[build-dependencies]
+cbindgen = "0.29.0"
 
 [lints]
 workspace = true
