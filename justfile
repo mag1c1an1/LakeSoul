@@ -50,55 +50,17 @@ dist:
     export CARGO_TARGET_DIR="$ROOT/rust/target"
     mkdir -p "$ROOT/dist"
 
-    # Maturin and the standalone cargo-zigbuild binary generate different
-    # linker-wrapper paths, which invalidates Cargo fingerprints. Intercept
-    # Maturin's Cargo invocation and build the FFI libraries in the exact same
-    # Zig/glibc 2.17 environment instead.
-    REAL_CARGO="$(command -v cargo)"
-    CARGO_WRAPPER_DIR="$(mktemp -d)"
-    trap 'rm -rf "$CARGO_WRAPPER_DIR"' EXIT
-
-    cat >"$CARGO_WRAPPER_DIR/cargo" <<'CARGO_WRAPPER'
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    if [[ "${1:-}" == "rustc" ]]; then
-        "$LAKESOUL_REAL_CARGO" "$@"
-
-        if [[ ! -e "$LAKESOUL_FFI_BUILD_MARKER" ]]; then
-            echo "Building LakeSoul C FFI libraries with Maturin's Zig toolchain..." >&2
-            "$LAKESOUL_REAL_CARGO" build \
-                --profile release \
-                --target x86_64-unknown-linux-gnu \
-                --manifest-path "$LAKESOUL_ROOT/Cargo.toml" \
-                --package lakesoul-io-c \
-                --package lakesoul-metadata-c \
-                --features lakesoul-io-c/hdfs \
-                1>&2
-            touch "$LAKESOUL_FFI_BUILD_MARKER"
-        fi
-        exit 0
-    fi
-
-    exec "$LAKESOUL_REAL_CARGO" "$@"
-    CARGO_WRAPPER
-    chmod +x "$CARGO_WRAPPER_DIR/cargo"
-
-    export LAKESOUL_REAL_CARGO="$REAL_CARGO"
-    export LAKESOUL_ROOT="$ROOT"
-    export LAKESOUL_FFI_BUILD_MARKER="$CARGO_WRAPPER_DIR/ffi-built"
-    export PATH="$CARGO_WRAPPER_DIR:$PATH"
-
     cd "$ROOT/python"
     uvx --from 'maturin[zig]==1.14.1' maturin build \
         --release \
         --zig \
         --target x86_64-unknown-linux-gnu \
+        --features 'pyo3/extension-module,dist-ffi' \
         --auditwheel repair \
         --compatibility manylinux2014 \
         --out "$ROOT/dist"
 
     cp \
-        "$CARGO_TARGET_DIR/x86_64-unknown-linux-gnu/release/liblakesoul_io_c.so" \
-        "$CARGO_TARGET_DIR/x86_64-unknown-linux-gnu/release/liblakesoul_metadata_c.so" \
+        "$CARGO_TARGET_DIR/x86_64-unknown-linux-gnu/release/deps/liblakesoul_io_c.so" \
+        "$CARGO_TARGET_DIR/x86_64-unknown-linux-gnu/release/deps/liblakesoul_metadata_c.so" \
         "$ROOT/dist/"

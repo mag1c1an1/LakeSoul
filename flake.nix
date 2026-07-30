@@ -53,8 +53,6 @@
         file
         pkg-config
 
-        cargo-zigbuild
-
         unstable.ty
       ];
 

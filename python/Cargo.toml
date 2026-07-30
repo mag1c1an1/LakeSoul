@@ -9,6 +9,9 @@ build = "build.rs"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+dist-ffi = ["dep:lakesoul-io-c", "dep:lakesoul-metadata-c"]
+
 [dependencies]
 pyo3 = { version = "0.28", features = [
   "extension-module",
@@ -17,10 +20,11 @@ pyo3 = { version = "0.28", features = [
 ] }
 pyo3-log = "0.13"
 log = { workspace = true }
-tracing-subscriber.workspace = true
 lakesoul-io = { path = "../rust/lakesoul-io", features = ["hdfs"] }
+lakesoul-io-c = { path = "../rust/lakesoul-io-c", optional = true, features = ["hdfs"] }
 lakesoul-common = { path = "../rust/lakesoul-common" }
 lakesoul-metadata = { path = "../rust/lakesoul-metadata" }
+lakesoul-metadata-c = { path = "../rust/lakesoul-metadata-c", optional = true }
 proto = { path = "../rust/proto" }
 uuid = { workspace = true }
 lakesoul-vector = { path = "../rust/lakesoul-vector" }
@@ -36,10 +40,6 @@ futures.workspace = true
 prost.workspace = true
 rootcause.workspace = true
 serde_json.workspace = true
-
-# Keep host dependency features aligned with lakesoul-io-c during dist builds.
-[build-dependencies]
-cbindgen = "0.29.0"
 
 [lints]
 workspace = true
