@@ -22,10 +22,10 @@ SPDX-License-Identifier: Apache-2.0
 
     <properties>
         <scalatest.version>3.2.14</scalatest.version>
-        <kafka.client.version>3.3.1</kafka.client.version>
+        <kafka.client.version>3.9.0</kafka.client.version>
         <schema.registry.version>7.3.1</schema.registry.version>
-        <avro.version>1.11.3</avro.version>
-        <mysql.version>8.0.30</mysql.version>
+        <avro.version>1.11.4</avro.version>
+        <mysql.version>8.4.0</mysql.version>
         <jackson.yaml.version>2.12.7</jackson.yaml.version>
         <local.scope>provided</local.scope>
         <test.fork.count>2</test.fork.count>
@@ -382,8 +382,8 @@ SPDX-License-Identifier: Apache-2.0
         </dependency>
 
         <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
             <version>${mysql.version}</version>
             <scope>test</scope>
         </dependency>
@@ -550,8 +550,8 @@ SPDX-License-Identifier: Apache-2.0
                             <include>com.google.flatbuffers:*</include>
                             <include>com.zaxxer:HikariCP</include>
                             <include>org.postgresql:postgresql</include>
-                            <include>com.alibaba:fastjson</include>
-                            <include>mysql:mysql-connector-java</include>
+                            <include>com.alibaba.fastjson2:fastjson2</include>
+                            <include>com.mysql:mysql-connector-j</include>
                             <include>io.jhdf:jhdf</include>
 
                             <include>com.googlecode.aviator:aviator</include>
@@ -583,8 +583,8 @@ SPDX-License-Identifier: Apache-2.0
                             <shadedPattern>com.lakesoul.shaded.org.postgresql</shadedPattern>
                         </relocation>
                         <relocation>
-                            <pattern>com.alibaba.fastjson</pattern>
-                            <shadedPattern>com.lakesoul.shaded.com.alibaba.fastjson</shadedPattern>
+                            <pattern>com.alibaba.fastjson2</pattern>
+                            <shadedPattern>com.lakesoul.shaded.com.alibaba.fastjson2</shadedPattern>
                         </relocation>
                         <relocation>
                             <pattern>com.google.flatbuffers</pattern>

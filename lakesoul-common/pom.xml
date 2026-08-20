@@ -126,7 +126,8 @@ SPDX-License-Identifier: Apache-2.0
     </build>
 
     <properties>
-        <postgresql.version>42.7.3</postgresql.version>
+        <postgresql.version>42.7.11</postgresql.version>
+        <fastjson2.version>2.0.57</fastjson2.version>
         <local.scope>provided</local.scope>
         <protobuf.plugin.version>0.6.1</protobuf.plugin.version>
         <protoc.version>3.5.1</protoc.version>
@@ -163,9 +164,9 @@ SPDX-License-Identifier: Apache-2.0
             <version>3.12.0</version>
         </dependency>
         <dependency>
-            <groupId>com.alibaba</groupId>
-            <artifactId>fastjson</artifactId>
-            <version>1.2.83</version>
+            <groupId>com.alibaba.fastjson2</groupId>
+            <artifactId>fastjson2</artifactId>
+            <version>${fastjson2.version}</version>
         </dependency>
         <!-- scala deps -->
         <dependency>
@@ -405,8 +406,8 @@ SPDX-License-Identifier: Apache-2.0
                                     <shadedPattern>com.lakesoul.shaded.org.postgresql</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>com.alibaba.fastjson</pattern>
-                                    <shadedPattern>com.lakesoul.shaded.com.alibaba.fastjson</shadedPattern>
+                                    <pattern>com.alibaba.fastjson2</pattern>
+                                    <shadedPattern>com.lakesoul.shaded.com.alibaba.fastjson2</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.ow2.asm</pattern>

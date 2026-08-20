@@ -4,7 +4,7 @@
 
 package com.dmetasoul.lakesoul.meta
 
-import com.alibaba.fastjson.JSONObject
+import com.alibaba.fastjson2.JSONObject
 import com.dmetasoul.lakesoul.meta.entity.PartitionInfo
 
 import java.util
