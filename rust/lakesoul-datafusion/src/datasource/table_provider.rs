@@ -854,21 +854,30 @@ impl LakeSoulTableProvider {
     fn merged_schema_with_input_nullability(
         merged_schema: SchemaRef,
         inputs: &[Arc<dyn ExecutionPlan>],
+        partition_columns: &[String],
     ) -> SchemaRef {
         Arc::new(Schema::new(
             merged_schema
                 .fields()
                 .iter()
                 .map(|field| {
+                    // The logical schema is the contract for nullability:
+                    // DataFusion's physical planner rejects scan outputs whose
+                    // fields are *more* nullable than the logical schema, so a
+                    // file-level nullable inference (parquet always infers
+                    // nullable) must not widen a logically non-null column.
+                    // Widen only when a non-partition column is genuinely
+                    // absent from some input (schema evolution), where merged
+                    // rows can be null; partition columns are projected
+                    // constants supplied by the merge exec.
+                    let missing_in_some_input = !partition_columns.contains(field.name())
+                        && inputs.iter().any(|input| {
+                            input.schema().column_with_name(field.name()).is_none()
+                        });
                     Field::new(
                         field.name(),
                         field.data_type().clone(),
-                        field.is_nullable()
-                            | inputs.iter().any(|input| {
-                                input.schema().column_with_name(field.name()).is_none_or(
-                                    |(_, input_field)| input_field.is_nullable(),
-                                )
-                            }),
+                        field.is_nullable() || missing_in_some_input,
                     )
                 })
                 .collect::<Vec<_>>(),
@@ -1056,7 +1065,6 @@ impl TableProvider for LakeSoulTableProvider {
             let file_path = config.file_groups[0].files()[0].path().to_string();
             let input = DataSourceExec::from_data_source(config);
             all_inputs.push(input.clone());
-
             if let Some((_, inputs)) = inputs_map.get_mut(&partition_desc) {
                 inputs.0.push(input);
                 inputs.1.push(file_path);
@@ -1068,8 +1076,11 @@ impl TableProvider for LakeSoulTableProvider {
             }
         }
 
-        let merged_schema =
-            Self::merged_schema_with_input_nullability(merged_schema, &all_inputs);
+        let merged_schema = Self::merged_schema_with_input_nullability(
+            merged_schema,
+            &all_inputs,
+            &self.range_partitions,
+        );
 
         let mut partitioned_execs = Vec::new();
         for (_, (partition_values, (inputs, file_paths))) in inputs_map {
@@ -1396,6 +1407,7 @@ mod tests {
         let merged_schema = LakeSoulTableProvider::merged_schema_with_input_nullability(
             merged_schema,
             &[old_input.clone(), new_input.clone()],
+            &[],
         );
 
         let old_partition = Arc::new(
