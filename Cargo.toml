@@ -57,7 +57,7 @@ datafusion-physical-plan = { version = "54" }
 datafusion-execution = { version = "54" }
 datafusion-datasource = { version = "54" }
 datafusion-proto = { version = "54" }
-datafusion-distributed = { version = "3.0.0" }
+datafusion-distributed = { version = "=3.0.0" }
 datafusion-datasource-parquet = { version = "54" }
 datafusion-substrait = { version = "54" }
 datafusion-python = { version = "54" }
