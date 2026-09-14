@@ -346,7 +346,7 @@ async fn explain_plan(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sql_vector_search_end_to_end() {
-    use crate::catalog::create_table_with_vector_index;
+    use crate::tests::create_table_with_vector_index;
 
     let client = Arc::new(MetaDataClient::from_env().await.unwrap());
     let table_name = "vec_search_sql_e2e";
@@ -473,7 +473,7 @@ async fn sql_vector_search_end_to_end() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sql_vector_search_with_where_and_nprobe() {
-    use crate::catalog::create_table_with_vector_index;
+    use crate::tests::create_table_with_vector_index;
 
     let client = Arc::new(MetaDataClient::from_env().await.unwrap());
     let table_name = "vec_search_sql_where";
@@ -555,7 +555,7 @@ async fn sql_vector_search_with_where_and_nprobe() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sql_vector_search_falls_back_without_index() {
-    use crate::catalog::create_table;
+    use crate::tests::create_table;
 
     let client = Arc::new(MetaDataClient::from_env().await.unwrap());
     let table_name = "vec_search_sql_noindex";
@@ -993,7 +993,7 @@ fn latest_generations(table_name: &str) -> Vec<u64> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn incremental_writes_auto_rebuild_when_delta_ratio_exceeded() {
-    use crate::catalog::create_table_with_vector_index;
+    use crate::tests::create_table_with_vector_index;
 
     let client = Arc::new(MetaDataClient::from_env().await.unwrap());
     let table_name = "vec_auto_rebuild_drift";
@@ -1072,7 +1072,7 @@ async fn incremental_writes_auto_rebuild_when_delta_ratio_exceeded() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rebuild_mode_none_never_rebuilds() {
-    use crate::catalog::create_table_with_vector_index;
+    use crate::tests::create_table_with_vector_index;
 
     let client = Arc::new(MetaDataClient::from_env().await.unwrap());
     let table_name = "vec_no_auto_rebuild";
@@ -1113,7 +1113,7 @@ async fn rebuild_mode_none_never_rebuilds() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn manual_rebuild_vector_index_rebuilds_all_shards() {
-    use crate::catalog::create_table_with_vector_index;
+    use crate::tests::create_table_with_vector_index;
 
     let client = Arc::new(MetaDataClient::from_env().await.unwrap());
     let table_name = "vec_manual_rebuild";
@@ -1201,7 +1201,7 @@ fn clustered_vectors(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cluster_skew_triggers_rebuild_even_when_shard_ratio_is_low() {
-    use crate::catalog::create_table_with_vector_index;
+    use crate::tests::create_table_with_vector_index;
     use rand::SeedableRng;
 
     let client = Arc::new(MetaDataClient::from_env().await.unwrap());
@@ -1312,7 +1312,7 @@ async fn cluster_skew_triggers_rebuild_even_when_shard_ratio_is_low() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn uniform_growth_does_not_trigger_per_cluster_rebuild_before_ratio() {
-    use crate::catalog::create_table_with_vector_index;
+    use crate::tests::create_table_with_vector_index;
     use rand::SeedableRng;
 
     let client = Arc::new(MetaDataClient::from_env().await.unwrap());
